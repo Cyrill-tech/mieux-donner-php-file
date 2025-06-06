@@ -74,7 +74,7 @@ function mieuxdonner_stripe_form() {
     ob_start();
     ?>
     <form id="stripe-donation-form">
-        <label for="name">Name:</label>
+        <label for="name">Name3:</label>
         <input type="text" id="name" name="name" required>
 
         <label for="email">Email:</label>
