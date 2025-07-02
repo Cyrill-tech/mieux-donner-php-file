@@ -64,6 +64,12 @@ function mieuxdonner_process_payment() {
         $validation_errors[] = 'Name cannot exceed 100 characters';
     }
 
+    // Validate and sanitize payment type
+    $payment_type = isset($_POST['payment_type']) ? sanitize_text_field($_POST['payment_type']) : '';
+    if (!in_array($payment_type, ['onetime', 'monthly'])) {
+        $validation_errors[] = 'Invalid payment type selected';
+    }
+
     // Return validation errors if any
     if (!empty($validation_errors)) {
         wp_send_json_error(['message' => 'Validation failed', 'errors' => $validation_errors], 400);
@@ -83,19 +89,95 @@ function mieuxdonner_process_payment() {
     \Stripe\Stripe::setApiKey($stripeSecretKey);
 
     try {
-        // Create Payment Intent with validated data
-        $paymentIntent = \Stripe\PaymentIntent::create([
-            'amount' => $amount,
-            'currency' => 'eur',
-            'receipt_email' => $email,
-            'metadata' => [
-                'donor_name' => $name,
-                'integration_check' => 'accept_a_payment',
-                'plugin_version' => '1.0'
-            ],
-        ]);
+        if ($payment_type === 'onetime') {
+            // Create one-time Payment Intent
+            $paymentIntent = \Stripe\PaymentIntent::create([
+                'amount' => $amount,
+                'currency' => 'eur',
+                'receipt_email' => $email,
+                'metadata' => [
+                    'donor_name' => $name,
+                    'payment_type' => 'onetime',
+                    'plugin_version' => '1.0'
+                ],
+            ]);
 
-        wp_send_json_success(['clientSecret' => $paymentIntent->client_secret]);
+            wp_send_json_success([
+                'clientSecret' => $paymentIntent->client_secret,
+                'paymentType' => 'onetime'
+            ]);
+
+        } else if ($payment_type === 'monthly') {
+            // Create or retrieve customer
+            $customers = \Stripe\Customer::all([
+                'email' => $email,
+                'limit' => 1
+            ]);
+
+            if (count($customers->data) > 0) {
+                $customer = $customers->data[0];
+            } else {
+                $customer = \Stripe\Customer::create([
+                    'email' => $email,
+                    'name' => $name,
+                    'metadata' => [
+                        'plugin_version' => '1.0'
+                    ]
+                ]);
+            }
+
+            // Create or retrieve product for monthly donations
+            $product_name = 'Monthly Donation';
+            $products = \Stripe\Product::all([
+                'limit' => 1,
+                'active' => true
+            ]);
+            
+            $product = null;
+            foreach ($products->data as $existing_product) {
+                if ($existing_product->name === $product_name) {
+                    $product = $existing_product;
+                    break;
+                }
+            }
+            
+            if (!$product) {
+                $product = \Stripe\Product::create([
+                    'name' => $product_name,
+                    'description' => 'Monthly recurring donation'
+                ]);
+            }
+
+            // Create price for this specific amount
+            $price = \Stripe\Price::create([
+                'product' => $product->id,
+                'unit_amount' => $amount,
+                'currency' => 'eur',
+                'recurring' => ['interval' => 'month']
+            ]);
+
+            // Create subscription
+            $subscription = \Stripe\Subscription::create([
+                'customer' => $customer->id,
+                'items' => [['price' => $price->id]],
+                'payment_behavior' => 'default_incomplete',
+                'payment_settings' => [
+                    'save_default_payment_method' => 'on_subscription'
+                ],
+                'expand' => ['latest_invoice.payment_intent'],
+                'metadata' => [
+                    'donor_name' => $name,
+                    'payment_type' => 'monthly',
+                    'plugin_version' => '1.0'
+                ]
+            ]);
+
+            wp_send_json_success([
+                'clientSecret' => $subscription->latest_invoice->payment_intent->client_secret,
+                'paymentType' => 'monthly',
+                'subscriptionId' => $subscription->id
+            ]);
+        }
         
     } catch (\Stripe\Exception\InvalidRequestException $e) {
         error_log('Stripe InvalidRequestException: ' . $e->getMessage());
@@ -135,6 +217,12 @@ function mieuxdonner_stripe_form() {
         <label for="email">Email:</label>
         <input type="email" id="email" name="email" required maxlength="254" pattern="[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$" title="Please enter a valid email address">
 
+        <label for="payment_type">Payment Type:</label>
+        <select id="payment_type" name="payment_type" required>
+            <option value="onetime">One-time Donation</option>
+            <option value="monthly">Monthly Donation</option>
+        </select>
+
         <label for="amount">Donation Amount (€):</label>
         <input type="number" id="amount" name="amount" min="1" max="999999" step="0.01" required title="Please enter an amount between €1.00 and €999,999.00">
 
@@ -168,6 +256,7 @@ function mieuxdonner_stripe_form() {
                 let amount = parseFloat(document.getElementById("amount").value);
                 let name = document.getElementById("name").value.trim();
                 let email = document.getElementById("email").value.trim();
+                let paymentType = document.getElementById("payment_type").value;
                 
                 // Validate inputs on client side
                 if (!name || name.length < 2 || name.length > 100) {
@@ -184,6 +273,11 @@ function mieuxdonner_stripe_form() {
                     document.getElementById("payment-message").innerText = "Amount must be between €1.00 and €999,999.00.";
                     return;
                 }
+
+                if (!paymentType || !["onetime", "monthly"].includes(paymentType)) {
+                    document.getElementById("payment-message").innerText = "Please select a valid payment type.";
+                    return;
+                }
                 
                 // Convert to cents for Stripe
                 let amountInCents = Math.round(amount * 100);
@@ -193,6 +287,7 @@ function mieuxdonner_stripe_form() {
                 formData.append("amount", amountInCents);
                 formData.append("name", name);
                 formData.append("email", email);
+                formData.append("payment_type", paymentType);
                 formData.append("nonce", "<?php echo wp_create_nonce('mieuxdonner_stripe_payment'); ?>");
                 
                 // Call backend to create a PaymentIntent
@@ -214,24 +309,47 @@ function mieuxdonner_stripe_form() {
                         return;
                     }
 
-                    // Confirm payment with Stripe
-                    let { paymentIntent, error } = await stripe.confirmCardPayment(data.data.clientSecret, {
-                        payment_method: { 
-                            card: card,
-                            billing_details: {
-                                name: name,
-                                email: email
+                    // Handle payment confirmation based on type
+                    if (data.data.paymentType === 'onetime') {
+                        // Confirm one-time payment
+                        let { paymentIntent, error } = await stripe.confirmCardPayment(data.data.clientSecret, {
+                            payment_method: { 
+                                card: card,
+                                billing_details: {
+                                    name: name,
+                                    email: email
+                                }
                             }
-                        }
-                    });
+                        });
 
-                    if (error) {
-                        document.getElementById("card-errors").textContent = error.message;
-                    } else {
-                        document.getElementById("payment-message").innerText = "Payment successful! Redirecting...";
-                        setTimeout(() => {
-                            window.location.href = "<?php echo esc_url(home_url('/merci')); ?>";
-                        }, 2000);
+                        if (error) {
+                            document.getElementById("card-errors").textContent = error.message;
+                        } else {
+                            document.getElementById("payment-message").innerText = "One-time donation successful! Redirecting...";
+                            setTimeout(() => {
+                                window.location.href = "<?php echo esc_url(home_url('/merci')); ?>";
+                            }, 2000);
+                        }
+                    } else if (data.data.paymentType === 'monthly') {
+                        // Confirm subscription payment
+                        let { paymentIntent, error } = await stripe.confirmCardPayment(data.data.clientSecret, {
+                            payment_method: { 
+                                card: card,
+                                billing_details: {
+                                    name: name,
+                                    email: email
+                                }
+                            }
+                        });
+
+                        if (error) {
+                            document.getElementById("card-errors").textContent = error.message;
+                        } else {
+                            document.getElementById("payment-message").innerText = "Monthly subscription set up successfully! Redirecting...";
+                            setTimeout(() => {
+                                window.location.href = "<?php echo esc_url(home_url('/merci')); ?>";
+                            }, 2000);
+                        }
                     }
                 } catch (error) {
                     document.getElementById("payment-message").innerText = "Network error. Please try again.";
