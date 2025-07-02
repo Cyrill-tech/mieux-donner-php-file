@@ -70,6 +70,25 @@ function mieuxdonner_process_payment() {
         $validation_errors[] = 'Invalid payment type selected';
     }
 
+    // Validate and sanitize charities
+    $charities = isset($_POST['charities']) && is_array($_POST['charities']) ? $_POST['charities'] : [];
+    $valid_charities = ['clean_water', 'education_fund', 'medical_aid', 'hunger_relief', 'environmental', 'refugee_support', 'childrens_rights', 'disaster_relief', 'mental_health', 'animal_welfare'];
+    $selected_charities = [];
+
+    if (empty($charities)) {
+        $validation_errors[] = 'Please select at least one charity to support';
+    } else {
+        foreach ($charities as $charity) {
+            $charity = sanitize_text_field($charity);
+            if (in_array($charity, $valid_charities)) {
+                $selected_charities[] = $charity;
+            }
+        }
+        if (empty($selected_charities)) {
+            $validation_errors[] = 'Invalid charity selection';
+        }
+    }
+
     // Return validation errors if any
     if (!empty($validation_errors)) {
         wp_send_json_error(['message' => 'Validation failed', 'errors' => $validation_errors], 400);
@@ -90,6 +109,24 @@ function mieuxdonner_process_payment() {
 
     try {
         if ($payment_type === 'onetime') {
+            // Create charity metadata
+            $charity_names = [
+                'clean_water' => 'Clean Water Initiative',
+                'education_fund' => 'Global Education Fund',
+                'medical_aid' => 'Emergency Medical Aid',
+                'hunger_relief' => 'Hunger Relief Network',
+                'environmental' => 'Environmental Protection Alliance',
+                'refugee_support' => 'Refugee Support Foundation',
+                'childrens_rights' => 'Children\'s Rights Advocacy',
+                'disaster_relief' => 'Disaster Relief Corps',
+                'mental_health' => 'Mental Health Support',
+                'animal_welfare' => 'Animal Welfare Society'
+            ];
+
+            $selected_charity_names = array_map(function($charity) use ($charity_names) {
+                return $charity_names[$charity] ?? $charity;
+            }, $selected_charities);
+
             // Create one-time Payment Intent
             $paymentIntent = \Stripe\PaymentIntent::create([
                 'amount' => $amount,
@@ -98,6 +135,8 @@ function mieuxdonner_process_payment() {
                 'metadata' => [
                     'donor_name' => $name,
                     'payment_type' => 'onetime',
+                    'selected_charities' => implode(', ', $selected_charity_names),
+                    'charity_count' => count($selected_charities),
                     'plugin_version' => '1.0'
                 ],
             ]);
@@ -168,6 +207,8 @@ function mieuxdonner_process_payment() {
                 'metadata' => [
                     'donor_name' => $name,
                     'payment_type' => 'monthly',
+                    'selected_charities' => implode(', ', $selected_charity_names),
+                    'charity_count' => count($selected_charities),
                     'plugin_version' => '1.0'
                 ]
             ]);
@@ -226,6 +267,22 @@ function mieuxdonner_stripe_form() {
         <label for="amount">Donation Amount (€):</label>
         <input type="number" id="amount" name="amount" min="1" max="999999" step="0.01" required title="Please enter an amount between €1.00 and €999,999.00">
 
+        <fieldset>
+            <legend>Select Charities to Support (choose at least one):</legend>
+            <div class="charity-checkboxes" style="display: flex; flex-direction: column; gap: 8px;">
+                <label style="display: flex; align-items: flex-start; gap: 8px;"><input type="checkbox" name="charities[]" value="clean_water" style="margin-top: 2px;"> Clean Water Initiative - Providing safe drinking water worldwide</label>
+                <label style="display: flex; align-items: flex-start; gap: 8px;"><input type="checkbox" name="charities[]" value="education_fund" style="margin-top: 2px;"> Global Education Fund - Supporting schools in developing countries</label>
+                <label style="display: flex; align-items: flex-start; gap: 8px;"><input type="checkbox" name="charities[]" value="medical_aid" style="margin-top: 2px;"> Emergency Medical Aid - Healthcare for crisis regions</label>
+                <label style="display: flex; align-items: flex-start; gap: 8px;"><input type="checkbox" name="charities[]" value="hunger_relief" style="margin-top: 2px;"> Hunger Relief Network - Fighting food insecurity globally</label>
+                <label style="display: flex; align-items: flex-start; gap: 8px;"><input type="checkbox" name="charities[]" value="environmental" style="margin-top: 2px;"> Environmental Protection Alliance - Climate action and conservation</label>
+                <label style="display: flex; align-items: flex-start; gap: 8px;"><input type="checkbox" name="charities[]" value="refugee_support" style="margin-top: 2px;"> Refugee Support Foundation - Assistance for displaced families</label>
+                <label style="display: flex; align-items: flex-start; gap: 8px;"><input type="checkbox" name="charities[]" value="childrens_rights" style="margin-top: 2px;"> Children's Rights Advocacy - Protecting vulnerable children</label>
+                <label style="display: flex; align-items: flex-start; gap: 8px;"><input type="checkbox" name="charities[]" value="disaster_relief" style="margin-top: 2px;"> Disaster Relief Corps - Emergency response and recovery</label>
+                <label style="display: flex; align-items: flex-start; gap: 8px;"><input type="checkbox" name="charities[]" value="mental_health" style="margin-top: 2px;"> Mental Health Support - Community wellness programs</label>
+                <label style="display: flex; align-items: flex-start; gap: 8px;"><input type="checkbox" name="charities[]" value="animal_welfare" style="margin-top: 2px;"> Animal Welfare Society - Protecting animals and wildlife</label>
+            </div>
+        </fieldset>
+
         <label>Card Info:</label>
         <div id="card-element"></div>
         <div id="card-errors" role="alert"></div>
@@ -258,6 +315,10 @@ function mieuxdonner_stripe_form() {
                 let email = document.getElementById("email").value.trim();
                 let paymentType = document.getElementById("payment_type").value;
                 
+                // Get selected charities
+                let charityCheckboxes = document.querySelectorAll('input[name="charities[]"]:checked');
+                let selectedCharities = Array.from(charityCheckboxes).map(cb => cb.value);
+                
                 // Validate inputs on client side
                 if (!name || name.length < 2 || name.length > 100) {
                     document.getElementById("payment-message").innerText = "Name must be between 2 and 100 characters.";
@@ -278,6 +339,11 @@ function mieuxdonner_stripe_form() {
                     document.getElementById("payment-message").innerText = "Please select a valid payment type.";
                     return;
                 }
+
+                if (selectedCharities.length === 0) {
+                    document.getElementById("payment-message").innerText = "Please select at least one charity to support.";
+                    return;
+                }
                 
                 // Convert to cents for Stripe
                 let amountInCents = Math.round(amount * 100);
@@ -289,6 +355,11 @@ function mieuxdonner_stripe_form() {
                 formData.append("email", email);
                 formData.append("payment_type", paymentType);
                 formData.append("nonce", "<?php echo wp_create_nonce('mieuxdonner_stripe_payment'); ?>");
+                
+                // Add selected charities to form data
+                selectedCharities.forEach(charity => {
+                    formData.append("charities[]", charity);
+                });
                 
                 // Call backend to create a PaymentIntent
                 try {
