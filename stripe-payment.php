@@ -70,10 +70,16 @@ function mieuxdonner_process_payment() {
         $validation_errors[] = 'Invalid payment type selected';
     }
 
+    // Validate and sanitize payment method
+    $payment_method = isset($_POST['payment_method']) ? sanitize_text_field($_POST['payment_method']) : 'card';
+    if (!in_array($payment_method, ['card', 'paypal', 'google_pay', 'apple_pay', 'express_checkout'])) {
+        $validation_errors[] = 'Invalid payment method selected';
+    }
+
     // Validate and sanitize charity (single selection)
     $charity = isset($_POST['charity']) ? sanitize_text_field($_POST['charity']) : '';
     $valid_charities = ['all_charities', 'clean_water', 'education_fund', 'medical_aid', 'hunger_relief', 'environmental', 'refugee_support', 'childrens_rights'];
-    
+
     if (empty($charity)) {
         $validation_errors[] = 'Please select a charity to support';
     } elseif (!in_array($charity, $valid_charities)) {
@@ -92,7 +98,7 @@ function mieuxdonner_process_payment() {
     // Load Stripe configuration
     require_once __DIR__ . '/../../../../secrets.php';
     require_once plugin_dir_path(__FILE__) . '../vendor/stripe/stripe-php/init.php';
-    
+
     if (empty($stripeSecretKey)) {
         error_log('Stripe secret key not found');
         wp_send_json_error(['message' => 'Payment system configuration error'], 500);
@@ -102,116 +108,267 @@ function mieuxdonner_process_payment() {
     \Stripe\Stripe::setApiKey($stripeSecretKey);
 
     try {
+        // Create charity metadata
+        $charity_names = [
+            'all_charities' => 'All charities fund',
+            'clean_water' => 'Clean Water Initiative',
+            'education_fund' => 'Global Education Fund',
+            'medical_aid' => 'Emergency Medical Aid',
+            'hunger_relief' => 'Hunger Relief Network',
+            'environmental' => 'Environmental Protection Alliance',
+            'refugee_support' => 'Refugee Support Foundation',
+            'childrens_rights' => 'Children\'s Rights Advocacy'
+        ];
+
+        $selected_charity_name = $charity_names[$charity] ?? $charity;
+
         if ($payment_type === 'onetime') {
-            // Create charity metadata
-            $charity_names = [
-                'all_charities' => 'All charities fund',
-                'clean_water' => 'Clean Water Initiative',
-                'education_fund' => 'Global Education Fund',
-                'medical_aid' => 'Emergency Medical Aid',
-                'hunger_relief' => 'Hunger Relief Network',
-                'environmental' => 'Environmental Protection Alliance',
-                'refugee_support' => 'Refugee Support Foundation',
-                'childrens_rights' => 'Children\'s Rights Advocacy'
-            ];
+            if ($payment_method === 'card') {
+                // For card payments, use PaymentIntent
+                $paymentIntent = \Stripe\PaymentIntent::create([
+                    'amount' => $amount,
+                    'currency' => 'eur',
+                    'receipt_email' => $email,
+                    'payment_method_types' => ['card'],
+                    'metadata' => [
+                        'donor_name' => $name,
+                        'donor_address' => $address,
+                        'payment_type' => 'onetime',
+                        'payment_method' => $payment_method,
+                        'selected_charity' => $selected_charity_name,
+                        'charity_code' => $charity,
+                        'plugin_version' => '1.0'
+                    ],
+                ]);
 
-            $selected_charity_name = $charity_names[$charity] ?? $charity;
+                wp_send_json_success([
+                    'clientSecret' => $paymentIntent->client_secret,
+                    'paymentType' => 'onetime',
+                    'usePaymentIntent' => true
+                ]);
+            } elseif ($payment_method === 'express_checkout') {
+                // For express checkout (PayPal, Google Pay, Apple Pay), use PaymentIntent with multiple methods
+                $paymentIntent = \Stripe\PaymentIntent::create([
+                    'amount' => $amount,
+                    'currency' => 'eur',
+                    'receipt_email' => $email,
+                    'payment_method_types' => ['card', 'paypal'],
+                    'metadata' => [
+                        'donor_name' => $name,
+                        'donor_address' => $address,
+                        'payment_type' => 'onetime',
+                        'payment_method' => $payment_method,
+                        'selected_charity' => $selected_charity_name,
+                        'charity_code' => $charity,
+                        'plugin_version' => '1.0'
+                    ],
+                ]);
 
-            // Create one-time Payment Intent
-            $paymentIntent = \Stripe\PaymentIntent::create([
-                'amount' => $amount,
-                'currency' => 'eur',
-                'receipt_email' => $email,
-                'metadata' => [
-                    'donor_name' => $name,
-                    'donor_address' => $address,
-                    'payment_type' => 'onetime',
-                    'selected_charity' => $selected_charity_name,
-                    'charity_code' => $charity,
-                    'plugin_version' => '1.0'
-                ],
-            ]);
+                wp_send_json_success([
+                    'clientSecret' => $paymentIntent->client_secret,
+                    'paymentType' => 'onetime',
+                    'usePaymentIntent' => true
+                ]);
+            } else {
+                // For PayPal, Google Pay, Apple Pay - use Checkout Session
+                $checkout_payment_methods = [];
+                switch ($payment_method) {
+                    case 'paypal':
+                        $checkout_payment_methods = ['paypal'];
+                        break;
+                    case 'google_pay':
+                        $checkout_payment_methods = ['card'];
+                        break;
+                    case 'apple_pay':
+                        $checkout_payment_methods = ['card'];
+                        break;
+                }
 
-            wp_send_json_success([
-                'clientSecret' => $paymentIntent->client_secret,
-                'paymentType' => 'onetime'
-            ]);
+                $session = \Stripe\Checkout\Session::create([
+                    'payment_method_types' => $checkout_payment_methods,
+                    'customer_email' => $email,
+                    'line_items' => [[
+                        'price_data' => [
+                            'currency' => 'eur',
+                            'product_data' => [
+                                'name' => 'Donation to ' . $selected_charity_name,
+                            ],
+                            'unit_amount' => $amount,
+                        ],
+                        'quantity' => 1,
+                    ]],
+                    'mode' => 'payment',
+                    'success_url' => home_url('/merci') . '?session_id={CHECKOUT_SESSION_ID}',
+                    'cancel_url' => home_url('/donate') . '?cancelled=1',
+                    'metadata' => [
+                        'donor_name' => $name,
+                        'donor_address' => $address,
+                        'payment_type' => 'onetime',
+                        'payment_method' => $payment_method,
+                        'selected_charity' => $selected_charity_name,
+                        'charity_code' => $charity,
+                        'plugin_version' => '1.0'
+                    ],
+                ]);
+
+                wp_send_json_success([
+                    'checkoutUrl' => $session->url,
+                    'paymentType' => 'onetime',
+                    'useCheckout' => true
+                ]);
+            }
 
         } else if ($payment_type === 'monthly') {
-            // Create or retrieve customer
-            $customers = \Stripe\Customer::all([
-                'email' => $email,
-                'limit' => 1
-            ]);
-
-            if (count($customers->data) > 0) {
-                $customer = $customers->data[0];
-            } else {
-                $customer = \Stripe\Customer::create([
+            if ($payment_method === 'card') {
+                // For card payments, use subscription with PaymentIntent
+                // Create or retrieve customer
+                $customers = \Stripe\Customer::all([
                     'email' => $email,
-                    'name' => $name,
+                    'limit' => 1
+                ]);
+
+                if (count($customers->data) > 0) {
+                    $customer = $customers->data[0];
+                } else {
+                    $customer = \Stripe\Customer::create([
+                        'email' => $email,
+                        'name' => $name,
+                        'metadata' => [
+                            'plugin_version' => '1.0'
+                        ]
+                    ]);
+                }
+
+                // Create or retrieve product for monthly donations
+                $product_name = 'Monthly Donation';
+                $products = \Stripe\Product::all([
+                    'limit' => 1,
+                    'active' => true
+                ]);
+
+                $product = null;
+                foreach ($products->data as $existing_product) {
+                    if ($existing_product->name === $product_name) {
+                        $product = $existing_product;
+                        break;
+                    }
+                }
+
+                if (!$product) {
+                    $product = \Stripe\Product::create([
+                        'name' => $product_name,
+                        'description' => 'Monthly recurring donation'
+                    ]);
+                }
+
+                // Create price for this specific amount
+                $price = \Stripe\Price::create([
+                    'product' => $product->id,
+                    'unit_amount' => $amount,
+                    'currency' => 'eur',
+                    'recurring' => ['interval' => 'month']
+                ]);
+
+                // Create subscription with card payment method
+                $subscription = \Stripe\Subscription::create([
+                    'customer' => $customer->id,
+                    'items' => [['price' => $price->id]],
+                    'payment_behavior' => 'default_incomplete',
+                    'payment_settings' => [
+                        'save_default_payment_method' => 'on_subscription',
+                        'payment_method_types' => ['card']
+                    ],
+                    'expand' => ['latest_invoice.payment_intent'],
                     'metadata' => [
+                        'donor_name' => $name,
+                        'donor_address' => $address,
+                        'payment_type' => 'monthly',
+                        'payment_method' => $payment_method,
+                        'selected_charity' => $selected_charity_name,
+                        'charity_code' => $charity,
                         'plugin_version' => '1.0'
                     ]
                 ]);
-            }
 
-            // Create or retrieve product for monthly donations
-            $product_name = 'Monthly Donation';
-            $products = \Stripe\Product::all([
-                'limit' => 1,
-                'active' => true
-            ]);
-            
-            $product = null;
-            foreach ($products->data as $existing_product) {
-                if ($existing_product->name === $product_name) {
-                    $product = $existing_product;
-                    break;
+                wp_send_json_success([
+                    'clientSecret' => $subscription->latest_invoice->payment_intent->client_secret,
+                    'paymentType' => 'monthly',
+                    'subscriptionId' => $subscription->id,
+                    'usePaymentIntent' => true
+                ]);
+            } else {
+                // For PayPal monthly subscriptions, use Checkout Session with subscription mode
+                $checkout_payment_methods = [];
+                switch ($payment_method) {
+                    case 'paypal':
+                        $checkout_payment_methods = ['paypal'];
+                        break;
+                    case 'google_pay':
+                    case 'apple_pay':
+                        // Monthly subscriptions for Google Pay/Apple Pay not supported, fallback to card
+                        wp_send_json_error(['message' => 'Monthly subscriptions are only supported with card or PayPal payments'], 400);
+                        exit;
                 }
-            }
-            
-            if (!$product) {
-                $product = \Stripe\Product::create([
-                    'name' => $product_name,
-                    'description' => 'Monthly recurring donation'
+
+                // Create or retrieve product for monthly donations
+                $product_name = 'Monthly Donation';
+                $products = \Stripe\Product::all([
+                    'limit' => 1,
+                    'active' => true
+                ]);
+
+                $product = null;
+                foreach ($products->data as $existing_product) {
+                    if ($existing_product->name === $product_name) {
+                        $product = $existing_product;
+                        break;
+                    }
+                }
+
+                if (!$product) {
+                    $product = \Stripe\Product::create([
+                        'name' => $product_name,
+                        'description' => 'Monthly recurring donation'
+                    ]);
+                }
+
+                // Create price for this specific amount
+                $price = \Stripe\Price::create([
+                    'product' => $product->id,
+                    'unit_amount' => $amount,
+                    'currency' => 'eur',
+                    'recurring' => ['interval' => 'month']
+                ]);
+
+                $session = \Stripe\Checkout\Session::create([
+                    'payment_method_types' => $checkout_payment_methods,
+                    'customer_email' => $email,
+                    'line_items' => [[
+                        'price' => $price->id,
+                        'quantity' => 1,
+                    ]],
+                    'mode' => 'subscription',
+                    'success_url' => home_url('/merci') . '?session_id={CHECKOUT_SESSION_ID}',
+                    'cancel_url' => home_url('/donate') . '?cancelled=1',
+                    'metadata' => [
+                        'donor_name' => $name,
+                        'donor_address' => $address,
+                        'payment_type' => 'monthly',
+                        'payment_method' => $payment_method,
+                        'selected_charity' => $selected_charity_name,
+                        'charity_code' => $charity,
+                        'plugin_version' => '1.0'
+                    ],
+                ]);
+
+                wp_send_json_success([
+                    'checkoutUrl' => $session->url,
+                    'paymentType' => 'monthly',
+                    'useCheckout' => true
                 ]);
             }
-
-            // Create price for this specific amount
-            $price = \Stripe\Price::create([
-                'product' => $product->id,
-                'unit_amount' => $amount,
-                'currency' => 'eur',
-                'recurring' => ['interval' => 'month']
-            ]);
-
-            // Create subscription
-            $subscription = \Stripe\Subscription::create([
-                'customer' => $customer->id,
-                'items' => [['price' => $price->id]],
-                'payment_behavior' => 'default_incomplete',
-                'payment_settings' => [
-                    'save_default_payment_method' => 'on_subscription'
-                ],
-                'expand' => ['latest_invoice.payment_intent'],
-                'metadata' => [
-                    'donor_name' => $name,
-                    'donor_address' => $address,
-                    'payment_type' => 'monthly',
-                    'selected_charity' => $selected_charity_name,
-                    'charity_code' => $charity,
-                    'plugin_version' => '1.0'
-                ]
-            ]);
-
-            wp_send_json_success([
-                'clientSecret' => $subscription->latest_invoice->payment_intent->client_secret,
-                'paymentType' => 'monthly',
-                'subscriptionId' => $subscription->id
-            ]);
         }
-        
+
     } catch (\Stripe\Exception\InvalidRequestException $e) {
         error_log('Stripe InvalidRequestException: ' . $e->getMessage());
         wp_send_json_error(['message' => 'Invalid payment request'], 400);
@@ -386,24 +543,37 @@ function mieuxdonner_stripe_form() {
             border: 1px solid #ddd;
             border-radius: 4px;
         }
-        .payment-methods {
-            display: flex;
-            gap: 15px;
+        #express-checkout-element {
             margin-bottom: 20px;
         }
-        .payment-method {
-            display: flex;
-            align-items: center;
-            gap: 5px;
+        .payment-divider {
+            text-align: center;
+            margin: 20px 0;
+            position: relative;
         }
-        #card-element {
+        .payment-divider::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 0;
+            right: 0;
+            height: 1px;
+            background: #ddd;
+        }
+        .payment-divider span {
+            background: #f5f5f5;
+            padding: 0 15px;
+            color: #666;
+            font-size: 14px;
+        }
+        #payment-element {
             background: white;
             padding: 10px;
             border: 1px solid #ddd;
             border-radius: 4px;
             margin-bottom: 10px;
         }
-        #card-errors {
+        #payment-errors {
             color: #dc3545;
             margin-bottom: 10px;
         }
@@ -509,26 +679,18 @@ function mieuxdonner_stripe_form() {
             <!-- Step 3: Payment Details -->
             <div class="form-step" data-step="3">
                 <h3>Payment details</h3>
-                <div class="payment-methods">
-                    <label class="payment-method">
-                        <input type="radio" name="payment_method" value="card" checked>
-                        <span>Card</span>
-                    </label>
-                    <label class="payment-method">
-                        <input type="radio" name="payment_method" value="bank_transfer">
-                        <span>Bank transfer</span>
-                    </label>
-                    <label class="payment-method">
-                        <input type="radio" name="payment_method" value="google_pay">
-                        <span>Google pay</span>
-                    </label>
-                </div>
-                <div id="card-payment-section">
-                    <div class="form-group">
-                        <label>Card information</label>
-                        <div id="card-element"></div>
-                        <div id="card-errors" role="alert"></div>
+                <div class="form-group">
+                    <label>Quick payment options</label>
+                    <div id="express-checkout-element">
+                        <!-- Express Checkout Element for wallets (PayPal, Google Pay, Apple Pay) -->
                     </div>
+                    <div class="payment-divider">
+                        <span>or pay with card</span>
+                    </div>
+                    <div id="payment-element">
+                        <!-- Payment Element for cards -->
+                    </div>
+                    <div id="payment-errors" role="alert"></div>
                 </div>
                 <div class="form-navigation">
                     <button type="button" class="btn btn-secondary" onclick="prevStep()">Back</button>
@@ -574,42 +736,203 @@ function mieuxdonner_stripe_form() {
             </div>
         </form>
 
+        <div id="validation-errors" class="error-message" style="display: none;"></div>
         <div id="payment-message" class="error-message"></div>
     </div>
 
     <script src="https://js.stripe.com/v3/"></script>
     <script>
         let currentStep = 1;
-        let stripe, elements, card;
-        
+        let stripe, elements, paymentElement, expressCheckoutElement;
+        let expressPaymentProcessed = false;
+        let usingCardElement = false;
+
         document.addEventListener("DOMContentLoaded", function () {
             var publicKey = "pk_test_51QlsvrLNz5yGb5MxNJOOhClOwwpFWwFAZsh0BU3rq0zK6mQ54P5eoWD4d8ZrJB48gMaRL8dCT5csaWz2PU6kxbSP00BSMd84Hy";
             stripe = Stripe(publicKey);
-            elements = stripe.elements();
-            
-            // Initialize card element when step 3 becomes active
-            initializeCardElement();
-            
+
+            // Initialize Stripe Elements
+            elements = stripe.elements({
+                appearance: {
+                    theme: 'stripe',
+                    variables: {
+                        colorPrimary: '#007cba',
+                        colorBackground: '#ffffff',
+                        colorText: '#30313d',
+                        colorDanger: '#dc3545',
+                        fontFamily: 'Arial, sans-serif',
+                        spacingUnit: '4px',
+                        borderRadius: '4px',
+                    }
+                }
+            });
+
             document.getElementById("stripe-donation-form").addEventListener("submit", handleFormSubmit);
         });
 
-        function initializeCardElement() {
-            if (!card) {
-                card = elements.create("card");
-                card.mount("#card-element");
+        async function initializePaymentElements() {
+            try {
+                // Clear existing elements
+                document.getElementById("express-checkout-element").innerHTML = "";
+                document.getElementById("payment-element").innerHTML = "";
+
+                // Get current amount for Express Checkout
+                const amount = parseFloat(document.getElementById("amount").value) || 100;
+                const amountInCents = Math.round(amount * 100);
+
+                // Create new Elements instance with amount and currency for Express Checkout
+                const expressElements = stripe.elements({
+                    mode: 'payment',
+                    amount: amountInCents,
+                    currency: 'eur',
+                    appearance: {
+                        theme: 'stripe',
+                        variables: {
+                            colorPrimary: '#007cba',
+                        }
+                    }
+                });
+
+                // Initialize Express Checkout Element
+                if (expressCheckoutElement) {
+                    expressCheckoutElement.unmount();
+                }
+
+                try {
+                    expressCheckoutElement = expressElements.create('expressCheckout', {
+                        onConfirm: async (event) => {
+                            console.log('Express Checkout confirmed:', event);
+                            await handleExpressCheckoutConfirm(event);
+                        },
+                        onCancel: () => {
+                            console.log('Express Checkout cancelled');
+                        },
+                        onShippingAddressChange: (event) => {
+                            // We don't need shipping for donations, resolve immediately
+                            event.resolve({});
+                        },
+                        onShippingRateChange: (event) => {
+                            // We don't need shipping for donations, resolve immediately
+                            event.resolve({});
+                        }
+                    });
+
+                    expressCheckoutElement.mount('#express-checkout-element');
+                    console.log('Express Checkout Element mounted successfully');
+                } catch (error) {
+                    console.warn('Express Checkout Element failed to mount:', error);
+                    // Hide express checkout section if it fails
+                    document.getElementById("express-checkout-element").style.display = 'none';
+                    document.querySelector('.payment-divider').style.display = 'none';
+                }
+
+                // Initialize Payment Element for cards with regular elements
+                if (!paymentElement) {
+                    try {
+                        paymentElement = elements.create('payment', {
+                            paymentMethodTypes: ['card']
+                        });
+
+                        paymentElement.mount('#payment-element');
+                        usingCardElement = false;
+                        console.log('Payment Element mounted successfully');
+                    } catch (error) {
+                        console.error('Payment Element failed to mount:', error);
+                        // Fallback to card element
+                        try {
+                            paymentElement = elements.create('card', {
+                                style: {
+                                    base: {
+                                        fontSize: '16px',
+                                        color: '#424770',
+                                        '::placeholder': {
+                                            color: '#aab7c4',
+                                        },
+                                    },
+                                },
+                            });
+
+                            paymentElement.mount('#payment-element');
+                            usingCardElement = true;
+                            console.log('Card Element mounted as fallback');
+                        } catch (cardError) {
+                            console.error('Both Payment Element and Card Element failed:', cardError);
+                            document.getElementById("payment-errors").textContent = "Unable to load payment form. Please refresh the page.";
+                        }
+                    }
+                }
+
+            } catch (error) {
+                console.error('Failed to initialize payment elements:', error);
+                document.getElementById("payment-errors").textContent = "Failed to load payment form. Please refresh the page.";
             }
         }
 
-        function nextStep() {
-            if (validateCurrentStep()) {
+        async function handleExpressCheckoutConfirm(event) {
+            try {
+                console.log('Express checkout event:', event);
+
+                // Get form data
+                const charity = document.querySelector('input[name="charity"]:checked')?.value || 'all_charities';
+                const amount = parseFloat(document.getElementById("amount").value) || 100;
+                const paymentType = document.querySelector('input[name="payment_type"]:checked')?.value || 'onetime';
+
+                // Extract billing details from the express checkout event
+                const billingDetails = event.billingDetails || {};
+                const name = billingDetails.name || '';
+                const email = billingDetails.email || '';
+                const address = billingDetails.address ?
+                    `${billingDetails.address.line1 || ''} ${billingDetails.address.line2 || ''}`.trim() : '';
+
+                console.log('Billing details from express checkout:', billingDetails);
+
+                // Create PaymentIntent on server
+                const response = await createPaymentIntent({
+                    amount: Math.round(amount * 100),
+                    charity,
+                    paymentType,
+                    paymentMethod: 'express_checkout',
+                    name,
+                    email,
+                    address
+                });
+
+                if (response.useCheckout) {
+                    // For checkout sessions, redirect
+                    window.location.href = response.checkoutUrl;
+                } else if (response.clientSecret) {
+                    // For PaymentIntent, confirm the payment
+                    event.resolve({
+                        clientSecret: response.clientSecret
+                    });
+                } else {
+                    event.reject({
+                        reason: 'fail'
+                    });
+                    document.getElementById("payment-errors").textContent = "Unable to process payment";
+                }
+
+            } catch (error) {
+                console.error('Express checkout error:', error);
+                event.reject({
+                    reason: 'fail'
+                });
+                document.getElementById("payment-errors").textContent = "Payment failed: " + error.message;
+            }
+        }
+
+
+        async function nextStep() {
+            if (await validateCurrentStep()) {
+                clearValidationError();
                 if (currentStep < 5) {
                     hideStep(currentStep);
                     currentStep++;
                     showStep(currentStep);
                     updateProgress();
-                    
+
                     if (currentStep === 3) {
-                        initializeCardElement();
+                        await initializePaymentElements();
                     }
                     if (currentStep === 5) {
                         updateSummary();
@@ -620,6 +943,7 @@ function mieuxdonner_stripe_form() {
 
         function prevStep() {
             if (currentStep > 1) {
+                clearValidationError();
                 hideStep(currentStep);
                 currentStep--;
                 showStep(currentStep);
@@ -639,7 +963,7 @@ function mieuxdonner_stripe_form() {
             document.querySelectorAll('.progress-step').forEach((step, index) => {
                 const stepNumber = index + 1;
                 const circle = step.querySelector('.step-circle');
-                
+
                 if (stepNumber < currentStep) {
                     circle.classList.add('completed');
                     circle.classList.remove('active');
@@ -655,33 +979,54 @@ function mieuxdonner_stripe_form() {
             });
         }
 
-        function validateCurrentStep() {
+        function showValidationError(message) {
+            const errorDiv = document.getElementById('validation-errors');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+            errorDiv.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+
+        function clearValidationError() {
+            const errorDiv = document.getElementById('validation-errors');
+            errorDiv.style.display = 'none';
+            errorDiv.textContent = '';
+        }
+
+        async function validateCurrentStep() {
+            clearValidationError();
+
             switch(currentStep) {
                 case 1:
                     const charity = document.querySelector('input[name="charity"]:checked');
                     if (!charity) {
-                        alert('Please select a charity');
+                        showValidationError('Please select a charity to continue');
                         return false;
                     }
                     return true;
                 case 2:
                     const amount = document.getElementById('amount').value;
                     if (!amount || amount < 1 || amount > 999999) {
-                        alert('Please enter a valid amount between €1 and €999,999');
+                        showValidationError('Please enter a valid amount between €1 and €999,999');
                         return false;
                     }
                     return true;
                 case 3:
-                    return true; // Card validation happens during payment
+                    // For step 3, just ensure payment elements are initialized
+                    // Actual validation happens during payment confirmation
+                    if (!paymentElement) {
+                        showValidationError('Payment form not ready. Please wait a moment and try again.');
+                        return false;
+                    }
+                    return true;
                 case 4:
                     const name = document.getElementById('full_name').value.trim();
                     const email = document.getElementById('email').value.trim();
                     if (!name || name.length < 2) {
-                        alert('Please enter a valid name');
+                        showValidationError('Please enter a valid name (at least 2 characters)');
                         return false;
                     }
                     if (!email || !/^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(email)) {
-                        alert('Please enter a valid email address');
+                        showValidationError('Please enter a valid email address');
                         return false;
                     }
                     return true;
@@ -704,15 +1049,46 @@ function mieuxdonner_stripe_form() {
             document.getElementById('summary-email').textContent = email;
         }
 
+
+        async function createPaymentIntent(data) {
+            const formData = new URLSearchParams();
+            formData.append("amount", data.amount);
+            formData.append("name", data.name);
+            formData.append("email", data.email);
+            formData.append("address", data.address || '');
+            formData.append("payment_type", data.paymentType);
+            formData.append("payment_method", data.paymentMethod);
+            formData.append("charity", data.charity);
+            formData.append("nonce", "<?php echo wp_create_nonce('mieuxdonner_stripe_payment'); ?>");
+
+            const response = await fetch("<?php echo esc_url(admin_url('admin-post.php?action=mieuxdonner_stripe_payment')); ?>", {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: formData.toString()
+            });
+
+            const result = await response.json();
+            if (!result.success) {
+                throw new Error(result.data?.message || "Payment processing failed");
+            }
+
+            return result.data;
+        }
+
         async function handleFormSubmit(event) {
             event.preventDefault();
-            
+
             if (currentStep !== 5) return;
-            
+
+            // Skip if express payment was already processed
+            if (expressPaymentProcessed) {
+                return;
+            }
+
             // Clear previous error messages
-            document.getElementById("card-errors").textContent = "";
+            document.getElementById("payment-errors").textContent = "";
             document.getElementById("payment-message").innerText = "";
-            
+
             // Get form data
             const charity = document.querySelector('input[name="charity"]:checked').value;
             const amount = parseFloat(document.getElementById("amount").value);
@@ -720,61 +1096,79 @@ function mieuxdonner_stripe_form() {
             const name = document.getElementById("full_name").value.trim();
             const email = document.getElementById("email").value.trim();
             const address = document.getElementById("address").value.trim();
-            
-            // Convert to cents for Stripe
-            const amountInCents = Math.round(amount * 100);
-            
-            // Create form data
-            const formData = new URLSearchParams();
-            formData.append("amount", amountInCents);
-            formData.append("name", name);
-            formData.append("email", email);
-            formData.append("address", address);
-            formData.append("payment_type", paymentType);
-            formData.append("charity", charity);
-            formData.append("nonce", "<?php echo wp_create_nonce('mieuxdonner_stripe_payment'); ?>");
-            
-            try {
-                // Create PaymentIntent
-                const response = await fetch("<?php echo esc_url(admin_url('admin-post.php?action=mieuxdonner_stripe_payment')); ?>", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-                    body: formData.toString()
-                });
 
-                const data = await response.json();
-                
-                if (!data.success) {
-                    let errorMessage = data.data && data.data.message ? data.data.message : "Payment processing failed.";
-                    if (data.data && data.data.errors && Array.isArray(data.data.errors)) {
-                        errorMessage += "\n" + data.data.errors.join("\n");
-                    }
-                    document.getElementById("payment-message").innerText = errorMessage;
+            try {
+                // Validate payment element is ready
+                if (!paymentElement) {
+                    document.getElementById("payment-errors").textContent = "Payment form not ready. Please wait and try again.";
                     return;
                 }
 
-                // Confirm payment
-                const { paymentIntent, error } = await stripe.confirmCardPayment(data.data.clientSecret, {
-                    payment_method: { 
-                        card: card,
-                        billing_details: {
-                            name: name,
-                            email: email,
-                            address: address ? { line1: address } : undefined
-                        }
-                    }
+                console.log('Payment element ready, using card element:', usingCardElement);
+
+                // Create PaymentIntent for card payment
+                const response = await createPaymentIntent({
+                    amount: Math.round(amount * 100),
+                    charity,
+                    paymentType,
+                    paymentMethod: 'card',
+                    name,
+                    email,
+                    address
                 });
 
-                if (error) {
-                    document.getElementById("card-errors").textContent = error.message;
+                console.log('PaymentIntent created:', response);
+
+                // Check if we're using Payment Element or Card Element
+                if (usingCardElement) {
+                    // Using Card Element - use confirmCardPayment
+                    const { error } = await stripe.confirmCardPayment(response.clientSecret, {
+                        payment_method: {
+                            card: paymentElement,
+                            billing_details: {
+                                name: name,
+                                email: email,
+                                address: address ? { line1: address } : undefined
+                            }
+                        }
+                    });
+
+                    if (error) {
+                        document.getElementById("payment-errors").textContent = error.message;
+                    } else {
+                        const successMessage = paymentType === 'monthly' ?
+                            "Monthly subscription set up successfully! Redirecting..." :
+                            "One-time donation successful! Redirecting...";
+                        document.getElementById("payment-message").innerText = successMessage;
+                        setTimeout(() => {
+                            window.location.href = "<?php echo esc_url(home_url('/merci')); ?>";
+                        }, 2000);
+                    }
                 } else {
-                    const successMessage = paymentType === 'monthly' ? 
-                        "Monthly subscription set up successfully! Redirecting..." : 
-                        "One-time donation successful! Redirecting...";
-                    document.getElementById("payment-message").innerText = successMessage;
-                    setTimeout(() => {
-                        window.location.href = "<?php echo esc_url(home_url('/merci')); ?>";
-                    }, 2000);
+                    // Using Payment Element - use confirmPayment
+                    const { error } = await stripe.confirmPayment({
+                        elements,
+                        clientSecret: response.clientSecret,
+                        confirmParams: {
+                            return_url: "<?php echo esc_url(home_url('/merci')); ?>",
+                            payment_method_data: {
+                                billing_details: {
+                                    name: name,
+                                    email: email,
+                                    address: address ? { line1: address } : undefined
+                                }
+                            }
+                        }
+                    });
+
+                    if (error) {
+                        if (error.type === 'card_error' || error.type === 'validation_error') {
+                            document.getElementById("payment-errors").textContent = error.message;
+                        } else {
+                            document.getElementById("payment-message").innerText = "An unexpected error occurred: " + error.message;
+                        }
+                    }
+                    // Note: For Payment Element, successful payments redirect automatically
                 }
             } catch (error) {
                 document.getElementById("payment-message").innerText = "Network error. Please try again.";
