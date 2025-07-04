@@ -89,6 +89,12 @@ function mieuxdonner_process_payment() {
     // Validate and sanitize address (optional)
     $address = isset($_POST['address']) ? sanitize_text_field($_POST['address']) : '';
 
+    // Validate and sanitize tip percentage
+    $tip_percentage = isset($_POST['tip_percentage']) ? absint($_POST['tip_percentage']) : 0;
+    if ($tip_percentage < 0 || $tip_percentage > 20) {
+        $validation_errors[] = 'Invalid tip percentage';
+    }
+
     // Return validation errors if any
     if (!empty($validation_errors)) {
         wp_send_json_error(['message' => 'Validation failed', 'errors' => $validation_errors], 400);
@@ -137,6 +143,7 @@ function mieuxdonner_process_payment() {
                         'payment_method' => $payment_method,
                         'selected_charity' => $selected_charity_name,
                         'charity_code' => $charity,
+                        'tip_percentage' => $tip_percentage,
                         'plugin_version' => '1.0'
                     ],
                 ]);
@@ -217,6 +224,7 @@ function mieuxdonner_process_payment() {
                         'payment_method' => $payment_method,
                         'selected_charity' => $selected_charity_name,
                         'charity_code' => $charity,
+                        'tip_percentage' => $tip_percentage,
                         'plugin_version' => '1.0'
                     ],
                 ]);
@@ -296,6 +304,7 @@ function mieuxdonner_process_payment() {
                         'payment_method' => $payment_method,
                         'selected_charity' => $selected_charity_name,
                         'charity_code' => $charity,
+                        'tip_percentage' => $tip_percentage,
                         'plugin_version' => '1.0'
                     ]
                 ]);
@@ -367,6 +376,7 @@ function mieuxdonner_process_payment() {
                         'payment_method' => $payment_method,
                         'selected_charity' => $selected_charity_name,
                         'charity_code' => $charity,
+                        'tip_percentage' => $tip_percentage,
                         'plugin_version' => '1.0'
                     ],
                 ]);
@@ -597,6 +607,130 @@ function mieuxdonner_stripe_form() {
             color: #dc3545;
             margin-bottom: 10px;
         }
+        .tipping-section {
+            margin-top: 30px;
+            padding: 20px;
+            background: white;
+            border-radius: 8px;
+            border: 1px solid #e0e0e0;
+        }
+        .tip-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+        .tip-title {
+            font-weight: bold;
+            color: #8B4513;
+        }
+        .tip-info {
+            cursor: help;
+            font-size: 14px;
+        }
+        .tip-description {
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 20px;
+            line-height: 1.4;
+        }
+        .learn-more {
+            color: #007cba;
+            text-decoration: none;
+        }
+        .learn-more:hover {
+            text-decoration: underline;
+        }
+        .tip-slider-container {
+            position: relative;
+            margin-bottom: 15px;
+        }
+        .tip-labels {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            font-size: 12px;
+            color: #666;
+        }
+        .tip-slider {
+            margin-bottom: 15px;
+            position: relative;
+        }
+        #tip-slider {
+            width: 100%;
+            height: 8px;
+            background: linear-gradient(to right, #f0f0f0 0%, #ff6b6b 100%);
+            border-radius: 4px;
+            outline: none;
+            -webkit-appearance: none;
+        }
+        #tip-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #ff6b6b;
+            cursor: pointer;
+            border: 2px solid white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        #tip-slider::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #ff6b6b;
+            cursor: pointer;
+            border: 2px solid white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        .tip-options {
+            display: flex;
+            justify-content: space-between;
+            gap: 8px;
+            margin-bottom: 15px;
+        }
+        .tip-btn {
+            flex: 1;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            background: white;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+        .tip-btn:hover {
+            border-color: #ff6b6b;
+            background: #fff5f5;
+        }
+        .tip-btn.active {
+            background: #ff6b6b;
+            color: white;
+            border-color: #ff6b6b;
+        }
+        .skip-tip-btn {
+            width: 100%;
+            padding: 8px;
+            background: transparent;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            color: #666;
+            text-align: center;
+            transition: all 0.2s;
+        }
+        .skip-tip-btn:hover {
+            background: #f5f5f5;
+            border-color: #999;
+        }
+        .tip-amount-display {
+            text-align: center;
+            font-weight: bold;
+            color: #333;
+            margin-top: 10px;
+        }
     </style>
 
     <div class="donation-form-container">
@@ -678,6 +812,42 @@ function mieuxdonner_stripe_form() {
                     <div class="form-group">
                         <label for="amount">Donation amount</label>
                         <input type="number" id="amount" name="amount" class="amount-input" min="1" max="999999" step="0.01" value="100" required>
+                    </div>
+                    
+                    <!-- Tipping Section -->
+                    <div class="tipping-section">
+                        <div class="tip-header">
+                            <span class="tip-title">Support our work</span>
+                            <span class="tip-info" title="We estimate that the average dollar spent on operations generates $6 for highly effective charities.">ℹ️</span>
+                        </div>
+                        <p class="tip-description">We estimate that the average dollar spent on operations generates $6 for highly effective charities. <a href="#" class="learn-more">Learn more</a></p>
+                        
+                        <div class="tip-slider-container">
+                            <div class="tip-labels">
+                                <span>0%</span>
+                                <span>5%</span>
+                                <span>10%</span>
+                                <span>15%</span>
+                                <span>20%</span>
+                            </div>
+                            <div class="tip-slider">
+                                <input type="range" id="tip-slider" min="0" max="20" step="5" value="10" onchange="updateTipAmount()">
+                                <div class="tip-track"></div>
+                            </div>
+                            <div class="tip-options">
+                                <button type="button" class="tip-btn" data-tip="0" onclick="setTip(0)">0%</button>
+                                <button type="button" class="tip-btn" data-tip="5" onclick="setTip(5)">5%</button>
+                                <button type="button" class="tip-btn active" data-tip="10" onclick="setTip(10)">10%</button>
+                                <button type="button" class="tip-btn" data-tip="15" onclick="setTip(15)">15%</button>
+                                <button type="button" class="tip-btn" data-tip="20" onclick="setTip(20)">20%</button>
+                            </div>
+                            <button type="button" class="skip-tip-btn" onclick="setTip(0)">Skip</button>
+                        </div>
+                        
+                        <div class="tip-amount-display">
+                            <span>Tip amount: €<span id="tip-amount">10.00</span></span>
+                            <input type="hidden" id="tip-percentage" name="tip_percentage" value="10">
+                        </div>
                     </div>
                 </div>
                 <div class="form-navigation">
@@ -1055,15 +1225,60 @@ function mieuxdonner_stripe_form() {
             }
         }
 
+        function setTip(percentage) {
+            // Update slider
+            document.getElementById('tip-slider').value = percentage;
+            
+            // Update hidden input
+            document.getElementById('tip-percentage').value = percentage;
+            
+            // Update active button
+            document.querySelectorAll('.tip-btn').forEach(btn => {
+                btn.classList.remove('active');
+                if (parseInt(btn.dataset.tip) === percentage) {
+                    btn.classList.add('active');
+                }
+            });
+            
+            // Update tip amount display
+            updateTipAmount();
+        }
+
+        function updateTipAmount() {
+            const donationAmount = parseFloat(document.getElementById('amount').value) || 0;
+            const tipPercentage = parseInt(document.getElementById('tip-slider').value) || 0;
+            const tipAmount = (donationAmount * tipPercentage / 100).toFixed(2);
+            
+            document.getElementById('tip-amount').textContent = tipAmount;
+            document.getElementById('tip-percentage').value = tipPercentage;
+            
+            // Update active button to match slider
+            document.querySelectorAll('.tip-btn').forEach(btn => {
+                btn.classList.remove('active');
+                if (parseInt(btn.dataset.tip) === tipPercentage) {
+                    btn.classList.add('active');
+                }
+            });
+        }
+
+        // Update tip amount when donation amount changes
+        document.addEventListener('DOMContentLoaded', function() {
+            // Add listener for amount changes
+            document.getElementById('amount').addEventListener('input', updateTipAmount);
+        });
+
         function updateSummary() {
             const charity = document.querySelector('input[name="charity"]:checked');
-            const amount = document.getElementById('amount').value;
+            const amount = parseFloat(document.getElementById('amount').value) || 0;
+            const tipPercentage = parseInt(document.getElementById('tip-percentage').value) || 0;
+            const tipAmount = (amount * tipPercentage / 100);
+            const totalAmount = amount + tipAmount;
             const paymentType = document.querySelector('input[name="payment_type"]:checked');
             const name = document.getElementById('full_name').value;
             const email = document.getElementById('email').value;
 
             document.getElementById('summary-charity').textContent = charity ? charity.nextElementSibling.textContent : '';
-            document.getElementById('summary-amount').textContent = amount;
+            document.getElementById('summary-amount').textContent = totalAmount.toFixed(2);
             document.getElementById('summary-frequency').textContent = paymentType ? (paymentType.value === 'monthly' ? 'Monthly' : 'One-time') : '';
             document.getElementById('summary-name').textContent = name;
             document.getElementById('summary-email').textContent = email;
@@ -1079,6 +1294,7 @@ function mieuxdonner_stripe_form() {
             formData.append("payment_type", data.paymentType);
             formData.append("payment_method", data.paymentMethod);
             formData.append("charity", data.charity);
+            formData.append("tip_percentage", data.tipPercentage || 0);
             formData.append("nonce", "<?php echo wp_create_nonce('mieuxdonner_stripe_payment'); ?>");
 
             const response = await fetch("<?php echo esc_url(admin_url('admin-post.php?action=mieuxdonner_stripe_payment')); ?>", {
@@ -1099,18 +1315,22 @@ function mieuxdonner_stripe_form() {
             // Collect current form data
             const charity = document.querySelector('input[name="charity"]:checked')?.value || 'all_charities';
             const amount = parseFloat(document.getElementById("amount").value) || 100;
+            const tipPercentage = parseInt(document.getElementById('tip-percentage').value) || 0;
+            const tipAmount = amount * tipPercentage / 100;
+            const totalAmount = amount + tipAmount;
             const paymentType = document.querySelector('input[name="payment_type"]:checked')?.value || 'onetime';
             
             try {
                 // Create checkout session for express payments
                 const response = await createPaymentIntent({
-                    amount: Math.round(amount * 100),
+                    amount: Math.round(totalAmount * 100),
                     charity,
                     paymentType,
                     paymentMethod,
                     name: '',
                     email: '',
-                    address: ''
+                    address: '',
+                    tipPercentage: tipPercentage
                 });
 
                 if (response.checkoutUrl) {
@@ -1143,6 +1363,9 @@ function mieuxdonner_stripe_form() {
             // Get form data
             const charity = document.querySelector('input[name="charity"]:checked').value;
             const amount = parseFloat(document.getElementById("amount").value);
+            const tipPercentage = parseInt(document.getElementById('tip-percentage').value) || 0;
+            const tipAmount = amount * tipPercentage / 100;
+            const totalAmount = amount + tipAmount;
             const paymentType = document.querySelector('input[name="payment_type"]:checked').value;
             const selectedPaymentMethod = document.querySelector('input[name="payment_method"]:checked').value;
             const name = document.getElementById("full_name").value.trim();
@@ -1161,13 +1384,14 @@ function mieuxdonner_stripe_form() {
 
                     // Create PaymentIntent for card payment
                     const response = await createPaymentIntent({
-                        amount: Math.round(amount * 100),
+                        amount: Math.round(totalAmount * 100),
                         charity,
                         paymentType,
                         paymentMethod: 'card',
                         name,
                         email,
-                        address
+                        address,
+                        tipPercentage: tipPercentage
                     });
 
                     console.log('PaymentIntent created:', response);
