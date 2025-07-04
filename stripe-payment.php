@@ -13,6 +13,7 @@ if (!defined('ABSPATH')) {
     exit; // Exit if accessed directly
 }
 
+
 // Include Stripe PHP library
 require_once plugin_dir_path(__FILE__) . '../vendor/autoload.php';
 
@@ -27,13 +28,13 @@ add_action('wp_enqueue_scripts', 'mieuxdonner_enqueue_stripe_scripts');
 function mieuxdonner_process_payment() {
     // Validate request method
     if ($_SERVER["REQUEST_METHOD"] !== "POST") {
-        wp_send_json_error(['message' => 'Invalid request method.'], 405);
+        wp_send_json_error(['message' => __('Invalid request method.', 'mieuxdonner-stripe')], 405);
         exit;
     }
 
     // Validate nonce for CSRF protection
     if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'mieuxdonner_stripe_payment')) {
-        wp_send_json_error(['message' => 'Security check failed.'], 403);
+        wp_send_json_error(['message' => __('Security check failed.', 'mieuxdonner-stripe')], 403);
         exit;
     }
 
@@ -43,37 +44,37 @@ function mieuxdonner_process_payment() {
     // Validate and sanitize amount
     $amount = isset($_POST['amount']) ? absint($_POST['amount']) : 0;
     if ($amount < 100) { // Minimum €1.00
-        $validation_errors[] = 'Amount must be at least €1.00';
+        $validation_errors[] = __('Amount must be at least €1.00', 'mieuxdonner-stripe');
     }
     if ($amount > 99999900) { // Maximum €999,999.00
-        $validation_errors[] = 'Amount cannot exceed €999,999.00';
+        $validation_errors[] = __('Amount cannot exceed €999,999.00', 'mieuxdonner-stripe');
     }
 
     // Validate and sanitize email
     $email = isset($_POST['email']) ? sanitize_email($_POST['email']) : '';
     if (empty($email) || !is_email($email)) {
-        $validation_errors[] = 'Valid email address is required';
+        $validation_errors[] = __('Valid email address is required', 'mieuxdonner-stripe');
     }
 
     // Validate and sanitize name
     $name = isset($_POST['name']) ? sanitize_text_field($_POST['name']) : '';
     if (empty($name) || strlen($name) < 2) {
-        $validation_errors[] = 'Name must be at least 2 characters long';
+        $validation_errors[] = __('Name must be at least 2 characters long', 'mieuxdonner-stripe');
     }
     if (strlen($name) > 100) {
-        $validation_errors[] = 'Name cannot exceed 100 characters';
+        $validation_errors[] = __('Name cannot exceed 100 characters', 'mieuxdonner-stripe');
     }
 
     // Validate and sanitize payment type
     $payment_type = isset($_POST['payment_type']) ? sanitize_text_field($_POST['payment_type']) : '';
     if (!in_array($payment_type, ['onetime', 'monthly'])) {
-        $validation_errors[] = 'Invalid payment type selected';
+        $validation_errors[] = __('Invalid payment type selected', 'mieuxdonner-stripe');
     }
 
     // Validate and sanitize payment method
     $payment_method = isset($_POST['payment_method']) ? sanitize_text_field($_POST['payment_method']) : 'card';
     if (!in_array($payment_method, ['card', 'paypal', 'google_pay', 'apple_pay', 'express_checkout'])) {
-        $validation_errors[] = 'Invalid payment method selected';
+        $validation_errors[] = __('Invalid payment method selected', 'mieuxdonner-stripe');
     }
 
     // Validate and sanitize charity (single selection)
@@ -81,9 +82,9 @@ function mieuxdonner_process_payment() {
     $valid_charities = ['all_charities', 'clean_water', 'education_fund', 'medical_aid', 'hunger_relief', 'environmental', 'refugee_support', 'childrens_rights'];
 
     if (empty($charity)) {
-        $validation_errors[] = 'Please select a charity to support';
+        $validation_errors[] = __('Please select a charity to support', 'mieuxdonner-stripe');
     } elseif (!in_array($charity, $valid_charities)) {
-        $validation_errors[] = 'Invalid charity selection';
+        $validation_errors[] = __('Invalid charity selection', 'mieuxdonner-stripe');
     }
 
     // Validate and sanitize address (optional)
@@ -92,7 +93,7 @@ function mieuxdonner_process_payment() {
     // Validate and sanitize tip percentage
     $tip_percentage = isset($_POST['tip_percentage']) ? absint($_POST['tip_percentage']) : 0;
     if ($tip_percentage < 0 || $tip_percentage > 20) {
-        $validation_errors[] = 'Invalid tip percentage';
+        $validation_errors[] = __('Invalid tip percentage', 'mieuxdonner-stripe');
     }
 
     // Return validation errors if any
@@ -417,7 +418,102 @@ function mieuxdonner_stripe_button() {
 }
 
 
-function mieuxdonner_stripe_form() {
+function mieuxdonner_stripe_form($atts = []) {
+    // Parse shortcode attributes
+    $atts = shortcode_atts([
+        'lang' => 'en'  // Default to English
+    ], $atts);
+    
+    $current_lang = $atts['lang'];
+    
+    // Define translations array
+    $translations = [
+        'en' => [
+            'charity_fund' => 'Charity/fund',
+            'donation_amount' => 'Donation amount',
+            'payment_details' => 'Payment details',
+            'personal_details' => 'Personal details',
+            'confirm_donation' => 'Confirm donation',
+            'select_charity' => 'Select charity to donate',
+            'all_charities_fund' => 'All charities fund',
+            'clean_water_initiative' => 'Clean Water Initiative',
+            'global_education_fund' => 'Global Education Fund',
+            'emergency_medical_aid' => 'Emergency Medical Aid',
+            'hunger_relief_network' => 'Hunger Relief Network',
+            'environmental_protection' => 'Environmental Protection Alliance',
+            'refugee_support' => 'Refugee Support Foundation',
+            'childrens_rights' => 'Children\'s Rights Advocacy',
+            'next' => 'Next',
+            'back' => 'Back',
+            'donate_to' => 'Donate to All charities fund',
+            'one_time' => 'One time',
+            'monthly' => 'Monthly',
+            'donation_amount_label' => 'Donation amount',
+            'support_our_work' => 'Support our work',
+            'operations_description' => 'We estimate that the average dollar spent on operations generates $6 for highly effective charities.',
+            'learn_more' => 'Learn more',
+            'tip_amount' => 'Tip amount',
+            'skip' => 'Skip',
+            'card' => 'Card',
+            'paypal' => 'PayPal',
+            'google_pay' => 'Google Pay',
+            'apple_pay' => 'Apple Pay',
+            'card_information' => 'Card information',
+            'full_name' => 'Full name',
+            'email' => 'Email',
+            'address' => 'Address',
+            'donation_summary' => 'Donation summary',
+            'charity' => 'Charity',
+            'amount' => 'Amount',
+            'frequency' => 'Frequency',
+            'name' => 'Name',
+            'confirm' => 'Confirm'
+        ],
+        'fr' => [
+            'charity_fund' => 'Association/fonds',
+            'donation_amount' => 'Montant du don',
+            'payment_details' => 'Détails de paiement',
+            'personal_details' => 'Détails personnels',
+            'confirm_donation' => 'Confirmer le don',
+            'select_charity' => 'Sélectionner une association à soutenir',
+            'all_charities_fund' => 'Fonds toutes associations',
+            'clean_water_initiative' => 'Initiative Eau Propre',
+            'global_education_fund' => 'Fonds Éducation Mondiale',
+            'emergency_medical_aid' => 'Aide Médicale d\'Urgence',
+            'hunger_relief_network' => 'Réseau Aide Alimentaire',
+            'environmental_protection' => 'Alliance Protection Environnementale',
+            'refugee_support' => 'Fondation Soutien Réfugiés',
+            'childrens_rights' => 'Défense des Droits de l\'Enfant',
+            'next' => 'Suivant',
+            'back' => 'Retour',
+            'donate_to' => 'Faire un don au fonds toutes associations',
+            'one_time' => 'Ponctuel',
+            'monthly' => 'Mensuel',
+            'donation_amount_label' => 'Montant du don',
+            'support_our_work' => 'Soutenez notre travail',
+            'operations_description' => 'Nous estimons qu\'en moyenne, chaque euro dépensé en opérations génère 6€ pour des associations très efficaces.',
+            'learn_more' => 'En savoir plus',
+            'tip_amount' => 'Montant du pourboire',
+            'skip' => 'Passer',
+            'card' => 'Carte',
+            'paypal' => 'PayPal',
+            'google_pay' => 'Google Pay',
+            'apple_pay' => 'Apple Pay',
+            'card_information' => 'Informations de carte',
+            'full_name' => 'Nom complet',
+            'email' => 'Email',
+            'address' => 'Adresse',
+            'donation_summary' => 'Résumé du don',
+            'charity' => 'Association',
+            'amount' => 'Montant',
+            'frequency' => 'Fréquence',
+            'name' => 'Nom',
+            'confirm' => 'Confirmer'
+        ]
+    ];
+    
+    $t = $translations[$current_lang] ?? $translations['en'];
+    
     ob_start();
     ?>
     <style>
@@ -737,80 +833,80 @@ function mieuxdonner_stripe_form() {
         <div class="progress-bar">
             <div class="progress-step active" data-step="1">
                 <div class="step-circle active">1</div>
-                <div class="step-label">Charity/fund</div>
+                <div class="step-label"><?php echo esc_html($t['charity_fund']); ?></div>
             </div>
             <div class="progress-step" data-step="2">
                 <div class="step-circle">2</div>
-                <div class="step-label">Donation amount</div>
+                <div class="step-label"><?php echo esc_html($t['donation_amount']); ?></div>
             </div>
             <div class="progress-step" data-step="3">
                 <div class="step-circle">3</div>
-                <div class="step-label">Payment details</div>
+                <div class="step-label"><?php echo esc_html($t['payment_details']); ?></div>
             </div>
             <div class="progress-step" data-step="4">
                 <div class="step-circle">4</div>
-                <div class="step-label">Personal details</div>
+                <div class="step-label"><?php echo esc_html($t['personal_details']); ?></div>
             </div>
             <div class="progress-step" data-step="5">
                 <div class="step-circle">5</div>
-                <div class="step-label">Confirm donation</div>
+                <div class="step-label"><?php echo esc_html($t['confirm_donation']); ?></div>
             </div>
         </div>
 
         <form id="stripe-donation-form">
             <!-- Step 1: Charity Selection -->
             <div class="form-step active" data-step="1">
-                <h3>Select charity to donate</h3>
+                <h3><?php echo esc_html($t['select_charity']); ?></h3>
                 <div class="charity-options">
                     <label class="charity-option">
                         <input type="radio" name="charity" value="all_charities" required>
-                        <span>All charities fund</span>
+                        <span><?php echo esc_html($t['all_charities_fund']); ?></span>
                     </label>
                     <label class="charity-option">
                         <input type="radio" name="charity" value="clean_water" required>
-                        <span>Clean Water Initiative</span>
+                        <span><?php echo esc_html($t['clean_water_initiative']); ?></span>
                     </label>
                     <label class="charity-option">
                         <input type="radio" name="charity" value="education_fund" required>
-                        <span>Global Education Fund</span>
+                        <span><?php echo esc_html($t['global_education_fund']); ?></span>
                     </label>
                     <label class="charity-option">
                         <input type="radio" name="charity" value="medical_aid" required>
-                        <span>Emergency Medical Aid</span>
+                        <span><?php echo esc_html($t['emergency_medical_aid']); ?></span>
                     </label>
                     <label class="charity-option">
                         <input type="radio" name="charity" value="hunger_relief" required>
-                        <span>Hunger Relief Network</span>
+                        <span><?php echo esc_html($t['hunger_relief_network']); ?></span>
                     </label>
                     <label class="charity-option">
                         <input type="radio" name="charity" value="environmental" required>
-                        <span>Environmental Protection Alliance</span>
+                        <span><?php echo esc_html($t['environmental_protection']); ?></span>
                     </label>
                     <label class="charity-option">
                         <input type="radio" name="charity" value="refugee_support" required>
-                        <span>Refugee Support Foundation</span>
+                        <span><?php echo esc_html($t['refugee_support']); ?></span>
                     </label>
                     <label class="charity-option">
                         <input type="radio" name="charity" value="childrens_rights" required>
-                        <span>Children's Rights Advocacy</span>
+                        <span><?php echo esc_html($t['childrens_rights']); ?></span>
                     </label>
                 </div>
                 <div class="form-navigation">
                     <div></div>
-                    <button type="button" class="btn btn-primary" onclick="nextStep()">Next</button>
+                    <button type="button" class="btn btn-primary" onclick="nextStep()"><?php echo esc_html($t['next']); ?></button>
                 </div>
             </div>
 
             <!-- Step 2: Donation Amount -->
             <div class="form-step" data-step="2">
                 <div class="donation-amount-section">
-                    <h3>Donate to All charities fund</h3>
+                    <h3><?php echo esc_html($t['donate_to']); ?></h3>
                     <div class="payment-type-toggle">
-                        <label><input type="radio" name="payment_type" value="onetime" checked> One time</label>
-                        <label><input type="radio" name="payment_type" value="monthly"> Monthly</label>
+                        <label><input type="radio" name="payment_type" value="onetime" checked> <?php echo esc_html($t['one_time']); ?></label>
+                        <label><input type="radio" name="payment_type" value="monthly"> <?php echo esc_html($t['monthly']); ?></label>
                     </div>
                     <div class="form-group">
-                        <label for="amount">Donation amount</label>
+                        <label for="amount"><?php echo esc_html($t['donation_amount_label']); ?></label>
                         <input type="number" id="amount" name="amount" class="amount-input" min="1" max="999999" step="0.01" value="100" required>
                     </div>
                     
@@ -949,6 +1045,9 @@ function mieuxdonner_stripe_form() {
         let stripe, elements, paymentElement, expressCheckoutElement;
         let expressPaymentProcessed = false;
         let usingCardElement = false;
+        
+        // Translations for JavaScript
+        const translations = <?php echo json_encode($t); ?>;
 
         document.addEventListener("DOMContentLoaded", function () {
             var publicKey = "pk_test_51QlsvrLNz5yGb5MxNJOOhClOwwpFWwFAZsh0BU3rq0zK6mQ54P5eoWD4d8ZrJB48gMaRL8dCT5csaWz2PU6kxbSP00BSMd84Hy";
