@@ -148,13 +148,23 @@ function mieuxdonner_process_payment() {
                 ]);
             } elseif ($payment_method === 'express_checkout') {
                 // For express checkout (PayPal, Google Pay, Apple Pay), use PaymentIntent with multiple methods
+                $payment_method_types = ['card'];
+                
+                // Add PayPal if available (you need to enable it in your Stripe dashboard)
+                try {
+                    // Check if PayPal is available for your account
+                    $payment_method_types[] = 'paypal';
+                } catch (\Exception $e) {
+                    // PayPal not available, continue with just card
+                }
+
                 $paymentIntent = \Stripe\PaymentIntent::create([
                     'amount' => $amount,
                     'currency' => 'eur',
-                    'receipt_email' => $email,
-                    'payment_method_types' => ['card', 'paypal'],
+                    'receipt_email' => $email ?: null,
+                    'payment_method_types' => $payment_method_types,
                     'metadata' => [
-                        'donor_name' => $name,
+                        'donor_name' => $name ?: 'Anonymous',
                         'donor_address' => $address,
                         'payment_type' => 'onetime',
                         'payment_method' => $payment_method,
@@ -679,19 +689,42 @@ function mieuxdonner_stripe_form() {
             <!-- Step 3: Payment Details -->
             <div class="form-step" data-step="3">
                 <h3>Payment details</h3>
-                <div class="form-group">
-                    <label>Quick payment options</label>
-                    <div id="express-checkout-element">
-                        <!-- Express Checkout Element for wallets (PayPal, Google Pay, Apple Pay) -->
-                    </div>
-                    <div class="payment-divider">
-                        <span>or pay with card</span>
-                    </div>
-                    <div id="payment-element">
-                        <!-- Payment Element for cards -->
-                    </div>
-                    <div id="payment-errors" role="alert"></div>
+                <div class="payment-methods">
+                    <label class="payment-method">
+                        <input type="radio" name="payment_method" value="card" checked>
+                        <span>💳 Card</span>
+                    </label>
+                    <label class="payment-method">
+                        <input type="radio" name="payment_method" value="paypal">
+                        <span>💙 PayPal</span>
+                    </label>
+                    <label class="payment-method">
+                        <input type="radio" name="payment_method" value="google_pay">
+                        <span>🟡 Google Pay</span>
+                    </label>
+                    <label class="payment-method">
+                        <input type="radio" name="payment_method" value="apple_pay">
+                        <span>🍎 Apple Pay</span>
+                    </label>
                 </div>
+                
+                <div id="card-payment-section">
+                    <div class="form-group">
+                        <label>Card information</label>
+                        <div id="payment-element">
+                            <!-- Payment Element for cards -->
+                        </div>
+                        <div id="payment-errors" role="alert"></div>
+                    </div>
+                </div>
+                
+                <div id="express-payment-section" style="display: none;">
+                    <div id="express-checkout-element">
+                        <!-- Express payment buttons -->
+                    </div>
+                    <div id="express-payment-errors" role="alert"></div>
+                </div>
+                
                 <div class="form-navigation">
                     <button type="button" class="btn btn-secondary" onclick="prevStep()">Back</button>
                     <button type="button" class="btn btn-primary" onclick="nextStep()">Next</button>
@@ -768,65 +801,33 @@ function mieuxdonner_stripe_form() {
             });
 
             document.getElementById("stripe-donation-form").addEventListener("submit", handleFormSubmit);
+            
+            // Add payment method change listeners
+            document.addEventListener('change', function(e) {
+                if (e.target.name === 'payment_method') {
+                    handlePaymentMethodChange(e.target.value);
+                }
+            });
         });
+
+        function handlePaymentMethodChange(selectedMethod) {
+            const cardSection = document.getElementById('card-payment-section');
+            const expressSection = document.getElementById('express-payment-section');
+            
+            if (selectedMethod === 'card') {
+                cardSection.style.display = 'block';
+                expressSection.style.display = 'none';
+            } else {
+                cardSection.style.display = 'none';
+                expressSection.style.display = 'block';
+                // Initialize express payment for the selected method
+                initializeExpressPayment(selectedMethod);
+            }
+        }
 
         async function initializePaymentElements() {
             try {
-                // Clear existing elements
-                document.getElementById("express-checkout-element").innerHTML = "";
-                document.getElementById("payment-element").innerHTML = "";
-
-                // Get current amount for Express Checkout
-                const amount = parseFloat(document.getElementById("amount").value) || 100;
-                const amountInCents = Math.round(amount * 100);
-
-                // Create new Elements instance with amount and currency for Express Checkout
-                const expressElements = stripe.elements({
-                    mode: 'payment',
-                    amount: amountInCents,
-                    currency: 'eur',
-                    appearance: {
-                        theme: 'stripe',
-                        variables: {
-                            colorPrimary: '#007cba',
-                        }
-                    }
-                });
-
-                // Initialize Express Checkout Element
-                if (expressCheckoutElement) {
-                    expressCheckoutElement.unmount();
-                }
-
-                try {
-                    expressCheckoutElement = expressElements.create('expressCheckout', {
-                        onConfirm: async (event) => {
-                            console.log('Express Checkout confirmed:', event);
-                            await handleExpressCheckoutConfirm(event);
-                        },
-                        onCancel: () => {
-                            console.log('Express Checkout cancelled');
-                        },
-                        onShippingAddressChange: (event) => {
-                            // We don't need shipping for donations, resolve immediately
-                            event.resolve({});
-                        },
-                        onShippingRateChange: (event) => {
-                            // We don't need shipping for donations, resolve immediately
-                            event.resolve({});
-                        }
-                    });
-
-                    expressCheckoutElement.mount('#express-checkout-element');
-                    console.log('Express Checkout Element mounted successfully');
-                } catch (error) {
-                    console.warn('Express Checkout Element failed to mount:', error);
-                    // Hide express checkout section if it fails
-                    document.getElementById("express-checkout-element").style.display = 'none';
-                    document.querySelector('.payment-divider').style.display = 'none';
-                }
-
-                // Initialize Payment Element for cards with regular elements
+                // Initialize card payment element
                 if (!paymentElement) {
                     try {
                         paymentElement = elements.create('payment', {
@@ -865,6 +866,25 @@ function mieuxdonner_stripe_form() {
             } catch (error) {
                 console.error('Failed to initialize payment elements:', error);
                 document.getElementById("payment-errors").textContent = "Failed to load payment form. Please refresh the page.";
+            }
+        }
+
+        async function initializeExpressPayment(paymentMethod) {
+            try {
+                const expressContainer = document.getElementById('express-checkout-element');
+                expressContainer.innerHTML = '';
+
+                if (paymentMethod === 'paypal') {
+                    expressContainer.innerHTML = '<button class="btn btn-primary" style="background: #0070ba; width: 100%; padding: 12px;" onclick="handleExpressPayment(\'paypal\')">Continue with PayPal</button>';
+                } else if (paymentMethod === 'google_pay') {
+                    expressContainer.innerHTML = '<button class="btn btn-primary" style="background: #4285f4; width: 100%; padding: 12px;" onclick="handleExpressPayment(\'google_pay\')">🟡 Pay with Google</button>';
+                } else if (paymentMethod === 'apple_pay') {
+                    expressContainer.innerHTML = '<button class="btn btn-primary" style="background: #000; width: 100%; padding: 12px;" onclick="handleExpressPayment(\'apple_pay\')">🍎 Pay with Apple Pay</button>';
+                }
+
+            } catch (error) {
+                console.error('Failed to initialize express payment:', error);
+                document.getElementById("express-payment-errors").textContent = "Unable to load " + paymentMethod + " payment.";
             }
         }
 
@@ -1075,6 +1095,37 @@ function mieuxdonner_stripe_form() {
             return result.data;
         }
 
+        async function handleExpressPayment(paymentMethod) {
+            // Collect current form data
+            const charity = document.querySelector('input[name="charity"]:checked')?.value || 'all_charities';
+            const amount = parseFloat(document.getElementById("amount").value) || 100;
+            const paymentType = document.querySelector('input[name="payment_type"]:checked')?.value || 'onetime';
+            
+            try {
+                // Create checkout session for express payments
+                const response = await createPaymentIntent({
+                    amount: Math.round(amount * 100),
+                    charity,
+                    paymentType,
+                    paymentMethod,
+                    name: '',
+                    email: '',
+                    address: ''
+                });
+
+                if (response.checkoutUrl) {
+                    // Redirect to Stripe Checkout for PayPal, Google Pay, Apple Pay
+                    window.location.href = response.checkoutUrl;
+                } else {
+                    document.getElementById("express-payment-errors").textContent = "Unable to process " + paymentMethod + " payment.";
+                }
+                
+            } catch (error) {
+                console.error('Express payment error:', error);
+                document.getElementById("express-payment-errors").textContent = "Payment failed: " + error.message;
+            }
+        }
+
         async function handleFormSubmit(event) {
             event.preventDefault();
 
@@ -1093,82 +1144,88 @@ function mieuxdonner_stripe_form() {
             const charity = document.querySelector('input[name="charity"]:checked').value;
             const amount = parseFloat(document.getElementById("amount").value);
             const paymentType = document.querySelector('input[name="payment_type"]:checked').value;
+            const selectedPaymentMethod = document.querySelector('input[name="payment_method"]:checked').value;
             const name = document.getElementById("full_name").value.trim();
             const email = document.getElementById("email").value.trim();
             const address = document.getElementById("address").value.trim();
 
             try {
-                // Validate payment element is ready
-                if (!paymentElement) {
-                    document.getElementById("payment-errors").textContent = "Payment form not ready. Please wait and try again.";
-                    return;
-                }
+                if (selectedPaymentMethod === 'card') {
+                    // Handle card payment
+                    if (!paymentElement) {
+                        document.getElementById("payment-errors").textContent = "Payment form not ready. Please wait and try again.";
+                        return;
+                    }
 
-                console.log('Payment element ready, using card element:', usingCardElement);
+                    console.log('Payment element ready, using card element:', usingCardElement);
 
-                // Create PaymentIntent for card payment
-                const response = await createPaymentIntent({
-                    amount: Math.round(amount * 100),
-                    charity,
-                    paymentType,
-                    paymentMethod: 'card',
-                    name,
-                    email,
-                    address
-                });
-
-                console.log('PaymentIntent created:', response);
-
-                // Check if we're using Payment Element or Card Element
-                if (usingCardElement) {
-                    // Using Card Element - use confirmCardPayment
-                    const { error } = await stripe.confirmCardPayment(response.clientSecret, {
-                        payment_method: {
-                            card: paymentElement,
-                            billing_details: {
-                                name: name,
-                                email: email,
-                                address: address ? { line1: address } : undefined
-                            }
-                        }
+                    // Create PaymentIntent for card payment
+                    const response = await createPaymentIntent({
+                        amount: Math.round(amount * 100),
+                        charity,
+                        paymentType,
+                        paymentMethod: 'card',
+                        name,
+                        email,
+                        address
                     });
 
-                    if (error) {
-                        document.getElementById("payment-errors").textContent = error.message;
-                    } else {
-                        const successMessage = paymentType === 'monthly' ?
-                            "Monthly subscription set up successfully! Redirecting..." :
-                            "One-time donation successful! Redirecting...";
-                        document.getElementById("payment-message").innerText = successMessage;
-                        setTimeout(() => {
-                            window.location.href = "<?php echo esc_url(home_url('/merci')); ?>";
-                        }, 2000);
-                    }
-                } else {
-                    // Using Payment Element - use confirmPayment
-                    const { error } = await stripe.confirmPayment({
-                        elements,
-                        clientSecret: response.clientSecret,
-                        confirmParams: {
-                            return_url: "<?php echo esc_url(home_url('/merci')); ?>",
-                            payment_method_data: {
+                    console.log('PaymentIntent created:', response);
+
+                    // Check if we're using Payment Element or Card Element
+                    if (usingCardElement) {
+                        // Using Card Element - use confirmCardPayment
+                        const { error } = await stripe.confirmCardPayment(response.clientSecret, {
+                            payment_method: {
+                                card: paymentElement,
                                 billing_details: {
                                     name: name,
                                     email: email,
                                     address: address ? { line1: address } : undefined
                                 }
                             }
-                        }
-                    });
+                        });
 
-                    if (error) {
-                        if (error.type === 'card_error' || error.type === 'validation_error') {
+                        if (error) {
                             document.getElementById("payment-errors").textContent = error.message;
                         } else {
-                            document.getElementById("payment-message").innerText = "An unexpected error occurred: " + error.message;
+                            const successMessage = paymentType === 'monthly' ?
+                                "Monthly subscription set up successfully! Redirecting..." :
+                                "One-time donation successful! Redirecting...";
+                            document.getElementById("payment-message").innerText = successMessage;
+                            setTimeout(() => {
+                                window.location.href = "<?php echo esc_url(home_url('/merci')); ?>";
+                            }, 2000);
                         }
+                    } else {
+                        // Using Payment Element - use confirmPayment
+                        const { error } = await stripe.confirmPayment({
+                            elements,
+                            clientSecret: response.clientSecret,
+                            confirmParams: {
+                                return_url: "<?php echo esc_url(home_url('/merci')); ?>",
+                                payment_method_data: {
+                                    billing_details: {
+                                        name: name,
+                                        email: email,
+                                        address: address ? { line1: address } : undefined
+                                    }
+                                }
+                            }
+                        });
+
+                        if (error) {
+                            if (error.type === 'card_error' || error.type === 'validation_error') {
+                                document.getElementById("payment-errors").textContent = error.message;
+                            } else {
+                                document.getElementById("payment-message").innerText = "An unexpected error occurred: " + error.message;
+                            }
+                        }
+                        // Note: For Payment Element, successful payments redirect automatically
                     }
-                    // Note: For Payment Element, successful payments redirect automatically
+                } else {
+                    // Handle express payments (PayPal, Google Pay, Apple Pay)
+                    await handleExpressPayment(selectedPaymentMethod);
                 }
             } catch (error) {
                 document.getElementById("payment-message").innerText = "Network error. Please try again.";
