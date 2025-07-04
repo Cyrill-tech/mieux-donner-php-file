@@ -50,21 +50,6 @@ function mieuxdonner_process_payment() {
         $validation_errors[] = __('Amount cannot exceed €999,999.00', 'mieuxdonner-stripe');
     }
 
-    // Validate and sanitize email
-    $email = isset($_POST['email']) ? sanitize_email($_POST['email']) : '';
-    if (empty($email) || !is_email($email)) {
-        $validation_errors[] = __('Valid email address is required', 'mieuxdonner-stripe');
-    }
-
-    // Validate and sanitize name
-    $name = isset($_POST['name']) ? sanitize_text_field($_POST['name']) : '';
-    if (empty($name) || strlen($name) < 2) {
-        $validation_errors[] = __('Name must be at least 2 characters long', 'mieuxdonner-stripe');
-    }
-    if (strlen($name) > 100) {
-        $validation_errors[] = __('Name cannot exceed 100 characters', 'mieuxdonner-stripe');
-    }
-
     // Validate and sanitize payment type
     $payment_type = isset($_POST['payment_type']) ? sanitize_text_field($_POST['payment_type']) : '';
     if (!in_array($payment_type, ['onetime', 'monthly'])) {
@@ -75,6 +60,21 @@ function mieuxdonner_process_payment() {
     $payment_method = isset($_POST['payment_method']) ? sanitize_text_field($_POST['payment_method']) : 'card';
     if (!in_array($payment_method, ['card', 'paypal', 'google_pay', 'apple_pay', 'express_checkout'])) {
         $validation_errors[] = __('Invalid payment method selected', 'mieuxdonner-stripe');
+    }
+
+    // Validate and sanitize email (now required for all payment methods since personal details are collected first)
+    $email = isset($_POST['email']) ? sanitize_email($_POST['email']) : '';
+    if (empty($email) || !is_email($email)) {
+        $validation_errors[] = __('Valid email address is required', 'mieuxdonner-stripe');
+    }
+
+    // Validate and sanitize name (now required for all payment methods since personal details are collected first)
+    $name = isset($_POST['name']) ? sanitize_text_field($_POST['name']) : '';
+    if (empty($name) || strlen($name) < 2) {
+        $validation_errors[] = __('Name must be at least 2 characters long', 'mieuxdonner-stripe');
+    }
+    if (strlen($name) > 100) {
+        $validation_errors[] = __('Name cannot exceed 100 characters', 'mieuxdonner-stripe');
     }
 
     // Validate and sanitize charity (single selection)
@@ -166,21 +166,28 @@ function mieuxdonner_process_payment() {
                     // PayPal not available, continue with just card
                 }
 
-                $paymentIntent = \Stripe\PaymentIntent::create([
+                $paymentIntent_data = [
                     'amount' => $amount,
                     'currency' => 'eur',
-                    'receipt_email' => $email ?: null,
                     'payment_method_types' => $payment_method_types,
                     'metadata' => [
-                        'donor_name' => $name ?: 'Anonymous',
+                        'donor_name' => $name ?: 'To be collected',
                         'donor_address' => $address,
                         'payment_type' => 'onetime',
                         'payment_method' => $payment_method,
                         'selected_charity' => $selected_charity_name,
                         'charity_code' => $charity,
+                        'tip_percentage' => $tip_percentage,
                         'plugin_version' => '1.0'
                     ],
-                ]);
+                ];
+
+                // Only add receipt_email if email is provided
+                if (!empty($email)) {
+                    $paymentIntent_data['receipt_email'] = $email;
+                }
+
+                $paymentIntent = \Stripe\PaymentIntent::create($paymentIntent_data);
 
                 wp_send_json_success([
                     'clientSecret' => $paymentIntent->client_secret,
@@ -841,11 +848,11 @@ function mieuxdonner_stripe_form($atts = []) {
             </div>
             <div class="progress-step" data-step="3">
                 <div class="step-circle">3</div>
-                <div class="step-label"><?php echo esc_html($t['payment_details']); ?></div>
+                <div class="step-label"><?php echo esc_html($t['personal_details']); ?></div>
             </div>
             <div class="progress-step" data-step="4">
                 <div class="step-circle">4</div>
-                <div class="step-label"><?php echo esc_html($t['personal_details']); ?></div>
+                <div class="step-label"><?php echo esc_html($t['payment_details']); ?></div>
             </div>
             <div class="progress-step" data-step="5">
                 <div class="step-circle">5</div>
@@ -952,31 +959,52 @@ function mieuxdonner_stripe_form($atts = []) {
                 </div>
             </div>
 
-            <!-- Step 3: Payment Details -->
+            <!-- Step 3: Personal Details -->
             <div class="form-step" data-step="3">
-                <h3>Payment details</h3>
+                <h3><?php echo esc_html($t['personal_details']); ?></h3>
+                <div class="form-group">
+                    <label for="full_name"><?php echo esc_html($t['full_name']); ?></label>
+                    <input type="text" id="full_name" name="name" required minlength="2" maxlength="100">
+                </div>
+                <div class="form-group">
+                    <label for="email"><?php echo esc_html($t['email']); ?></label>
+                    <input type="email" id="email" name="email" required maxlength="254">
+                </div>
+                <div class="form-group">
+                    <label for="address"><?php echo esc_html($t['address']); ?></label>
+                    <input type="text" id="address" name="address" maxlength="255">
+                </div>
+                <div class="form-navigation">
+                    <button type="button" class="btn btn-secondary" onclick="prevStep()"><?php echo esc_html($t['back']); ?></button>
+                    <button type="button" class="btn btn-primary" onclick="nextStep()"><?php echo esc_html($t['next']); ?></button>
+                </div>
+            </div>
+
+            <!-- Step 4: Payment Details -->
+            <div class="form-step" data-step="4">
+                <h3><?php echo esc_html($t['payment_details']); ?></h3>
                 <div class="payment-methods">
                     <label class="payment-method">
                         <input type="radio" name="payment_method" value="card" checked>
-                        <span>💳 Card</span>
+                        <span>💳 <?php echo esc_html($t['card']); ?></span>
                     </label>
                     <label class="payment-method">
                         <input type="radio" name="payment_method" value="paypal">
-                        <span>💙 PayPal</span>
+                        <span>💙 <?php echo esc_html($t['paypal']); ?></span>
                     </label>
                     <label class="payment-method">
                         <input type="radio" name="payment_method" value="google_pay">
-                        <span>🟡 Google Pay</span>
+                        <span>🟡 <?php echo esc_html($t['google_pay']); ?></span>
                     </label>
                     <label class="payment-method">
                         <input type="radio" name="payment_method" value="apple_pay">
-                        <span>🍎 Apple Pay</span>
+                        <span>🍎 <?php echo esc_html($t['apple_pay']); ?></span>
                     </label>
                 </div>
                 
                 <div id="card-payment-section">
                     <div class="form-group">
-                        <label>Card information</label>
+                        <label><?php echo esc_html($t['card_information']); ?></label>
                         <div id="payment-element">
                             <!-- Payment Element for cards -->
                         </div>
@@ -992,29 +1020,8 @@ function mieuxdonner_stripe_form($atts = []) {
                 </div>
                 
                 <div class="form-navigation">
-                    <button type="button" class="btn btn-secondary" onclick="prevStep()">Back</button>
-                    <button type="button" class="btn btn-primary" onclick="nextStep()">Next</button>
-                </div>
-            </div>
-
-            <!-- Step 4: Personal Details -->
-            <div class="form-step" data-step="4">
-                <h3>Personal details</h3>
-                <div class="form-group">
-                    <label for="full_name">Full name</label>
-                    <input type="text" id="full_name" name="name" required minlength="2" maxlength="100">
-                </div>
-                <div class="form-group">
-                    <label for="email">Email</label>
-                    <input type="email" id="email" name="email" required maxlength="254">
-                </div>
-                <div class="form-group">
-                    <label for="address">Address</label>
-                    <input type="text" id="address" name="address" maxlength="255">
-                </div>
-                <div class="form-navigation">
-                    <button type="button" class="btn btn-secondary" onclick="prevStep()">Back</button>
-                    <button type="button" class="btn btn-primary" onclick="nextStep()">Next</button>
+                    <button type="button" class="btn btn-secondary" onclick="prevStep()"><?php echo esc_html($t['back']); ?></button>
+                    <button type="button" class="btn btn-primary" onclick="nextStep()"><?php echo esc_html($t['next']); ?></button>
                 </div>
             </div>
 
@@ -1220,7 +1227,7 @@ function mieuxdonner_stripe_form($atts = []) {
                     showStep(currentStep);
                     updateProgress();
 
-                    if (currentStep === 3) {
+                    if (currentStep === 4) {
                         await initializePaymentElements();
                     }
                     if (currentStep === 5) {
@@ -1300,14 +1307,6 @@ function mieuxdonner_stripe_form($atts = []) {
                     }
                     return true;
                 case 3:
-                    // For step 3, just ensure payment elements are initialized
-                    // Actual validation happens during payment confirmation
-                    if (!paymentElement) {
-                        showValidationError('Payment form not ready. Please wait a moment and try again.');
-                        return false;
-                    }
-                    return true;
-                case 4:
                     const name = document.getElementById('full_name').value.trim();
                     const email = document.getElementById('email').value.trim();
                     if (!name || name.length < 2) {
@@ -1316,6 +1315,14 @@ function mieuxdonner_stripe_form($atts = []) {
                     }
                     if (!email || !/^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(email)) {
                         showValidationError('Please enter a valid email address');
+                        return false;
+                    }
+                    return true;
+                case 4:
+                    // For step 4, just ensure payment elements are initialized
+                    // Actual validation happens during payment confirmation
+                    if (!paymentElement) {
+                        showValidationError('Payment form not ready. Please wait a moment and try again.');
                         return false;
                     }
                     return true;
@@ -1419,6 +1426,11 @@ function mieuxdonner_stripe_form($atts = []) {
             const totalAmount = amount + tipAmount;
             const paymentType = document.querySelector('input[name="payment_type"]:checked')?.value || 'onetime';
             
+            // Collect personal details from Step 3
+            const name = document.getElementById("full_name").value.trim();
+            const email = document.getElementById("email").value.trim();
+            const address = document.getElementById("address").value.trim();
+            
             try {
                 // Create checkout session for express payments
                 const response = await createPaymentIntent({
@@ -1426,9 +1438,9 @@ function mieuxdonner_stripe_form($atts = []) {
                     charity,
                     paymentType,
                     paymentMethod,
-                    name: '',
-                    email: '',
-                    address: '',
+                    name,
+                    email,
+                    address,
                     tipPercentage: tipPercentage
                 });
 
