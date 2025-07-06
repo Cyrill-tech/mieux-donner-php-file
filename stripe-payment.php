@@ -195,36 +195,18 @@ function mieuxdonner_process_payment() {
                     'usePaymentIntent' => true
                 ]);
             } else {
-                // For PayPal, Google Pay, Apple Pay - use Checkout Session
-                $checkout_payment_methods = [];
-                switch ($payment_method) {
-                    case 'paypal':
-                        $checkout_payment_methods = ['paypal'];
-                        break;
-                    case 'google_pay':
-                        $checkout_payment_methods = ['card'];
-                        break;
-                    case 'apple_pay':
-                        $checkout_payment_methods = ['card'];
-                        break;
+                // For PayPal, Google Pay, Apple Pay - use PaymentIntent with multiple payment methods
+                $payment_method_types = ['card'];
+                
+                if ($payment_method === 'paypal') {
+                    $payment_method_types[] = 'paypal';
                 }
 
-                $session = \Stripe\Checkout\Session::create([
-                    'payment_method_types' => $checkout_payment_methods,
-                    'customer_email' => $email,
-                    'line_items' => [[
-                        'price_data' => [
-                            'currency' => 'eur',
-                            'product_data' => [
-                                'name' => 'Donation to ' . $selected_charity_name,
-                            ],
-                            'unit_amount' => $amount,
-                        ],
-                        'quantity' => 1,
-                    ]],
-                    'mode' => 'payment',
-                    'success_url' => home_url('/merci') . '?session_id={CHECKOUT_SESSION_ID}',
-                    'cancel_url' => home_url('/donate') . '?cancelled=1',
+                $paymentIntent = \Stripe\PaymentIntent::create([
+                    'amount' => $amount,
+                    'currency' => 'eur',
+                    'receipt_email' => $email,
+                    'payment_method_types' => $payment_method_types,
                     'metadata' => [
                         'donor_name' => $name,
                         'donor_address' => $address,
@@ -238,9 +220,9 @@ function mieuxdonner_process_payment() {
                 ]);
 
                 wp_send_json_success([
-                    'checkoutUrl' => $session->url,
+                    'clientSecret' => $paymentIntent->client_secret,
                     'paymentType' => 'onetime',
-                    'useCheckout' => true
+                    'usePaymentIntent' => true
                 ]);
             }
 
@@ -1151,11 +1133,11 @@ function mieuxdonner_stripe_form($atts = []) {
                 expressContainer.innerHTML = '';
 
                 if (paymentMethod === 'paypal') {
-                    expressContainer.innerHTML = '<button class="btn btn-primary" style="background: #0070ba; width: 100%; padding: 12px;" onclick="handleExpressPayment(\'paypal\')">Continue with PayPal</button>';
+                    expressContainer.innerHTML = '<div style="background: #0070ba; color: white; padding: 12px; border-radius: 4px; text-align: center;">💙 PayPal</div>';
                 } else if (paymentMethod === 'google_pay') {
-                    expressContainer.innerHTML = '<button class="btn btn-primary" style="background: #4285f4; width: 100%; padding: 12px;" onclick="handleExpressPayment(\'google_pay\')">🟡 Pay with Google</button>';
+                    expressContainer.innerHTML = '<div style="background: #4285f4; color: white; padding: 12px; border-radius: 4px; text-align: center;">🟡 Google Pay</div>';
                 } else if (paymentMethod === 'apple_pay') {
-                    expressContainer.innerHTML = '<button class="btn btn-primary" style="background: #000; width: 100%; padding: 12px;" onclick="handleExpressPayment(\'apple_pay\')">🍎 Pay with Apple Pay</button>';
+                    expressContainer.innerHTML = '<div style="background: #000; color: white; padding: 12px; border-radius: 4px; text-align: center;">🍎 Apple Pay</div>';
                 }
 
             } catch (error) {
@@ -1559,8 +1541,47 @@ function mieuxdonner_stripe_form($atts = []) {
                         // Note: For Payment Element, successful payments redirect automatically
                     }
                 } else {
-                    // Handle express payments (PayPal, Google Pay, Apple Pay)
-                    await handleExpressPayment(selectedPaymentMethod);
+                    // Handle PayPal and other express payments using PaymentIntent
+                    const response = await createPaymentIntent({
+                        amount: Math.round(totalAmount * 100),
+                        charity,
+                        paymentType,
+                        paymentMethod: selectedPaymentMethod,
+                        name,
+                        email,
+                        address,
+                        tipPercentage: tipPercentage
+                    });
+
+                    console.log('Express payment response:', response);
+
+                    if (response.usePaymentIntent && response.clientSecret) {
+                        // For PayPal and other express payments, use confirmPayment
+                        const { error } = await stripe.confirmPayment({
+                            clientSecret: response.clientSecret,
+                            confirmParams: {
+                                return_url: "<?php echo esc_url(home_url('/merci')); ?>",
+                                payment_method_data: {
+                                    type: selectedPaymentMethod,
+                                    billing_details: {
+                                        name: name,
+                                        email: email,
+                                        address: address ? { line1: address } : undefined
+                                    }
+                                }
+                            }
+                        });
+
+                        if (error) {
+                            if (error.type === 'card_error' || error.type === 'validation_error') {
+                                document.getElementById("payment-errors").textContent = error.message;
+                            } else {
+                                document.getElementById("payment-message").innerText = "An unexpected error occurred: " + error.message;
+                            }
+                        }
+                    } else {
+                        document.getElementById("payment-message").innerText = "Unable to process " + selectedPaymentMethod + " payment.";
+                    }
                 }
             } catch (error) {
                 document.getElementById("payment-message").innerText = "Network error. Please try again.";
