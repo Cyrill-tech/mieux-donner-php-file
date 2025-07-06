@@ -1118,8 +1118,9 @@ function mieuxdonner_stripe_form($atts = []) {
             var publicKey = "pk_test_51QlsvrLNz5yGb5MxNJOOhClOwwpFWwFAZsh0BU3rq0zK6mQ54P5eoWD4d8ZrJB48gMaRL8dCT5csaWz2PU6kxbSP00BSMd84Hy";
             stripe = Stripe(publicKey);
 
-            // Initialize Stripe Elements
+            // Initialize Stripe Elements with French locale (supports both FR and CH postal codes)
             elements = stripe.elements({
+                locale: 'fr',
                 appearance: {
                     theme: 'stripe',
                     variables: {
@@ -1192,6 +1193,9 @@ function mieuxdonner_stripe_form($atts = []) {
 
             document.getElementById("stripe-donation-form").addEventListener("submit", handleFormSubmit);
             
+            // Initialize payment elements for card method (default)
+            initializePaymentElements();
+            
             // Add payment method change listeners
             document.addEventListener('change', function(e) {
                 if (e.target.name === 'payment_method') {
@@ -1218,39 +1222,28 @@ function mieuxdonner_stripe_form($atts = []) {
 
         async function initializePaymentElements() {
             try {
-                // Initialize card payment element
+                // Initialize card payment element - use Card Element directly to avoid postal code validation
                 if (!paymentElement) {
                     try {
-                        paymentElement = elements.create('payment', {
-                            paymentMethodTypes: ['card']
+                        paymentElement = elements.create('card', {
+                            hidePostalCode: true,
+                            style: {
+                                base: {
+                                    fontSize: '16px',
+                                    color: '#424770',
+                                    '::placeholder': {
+                                        color: '#aab7c4',
+                                    },
+                                },
+                            },
                         });
 
                         paymentElement.mount('#payment-element');
-                        usingCardElement = false;
-                        console.log('Payment Element mounted successfully');
-                    } catch (error) {
-                        console.error('Payment Element failed to mount:', error);
-                        // Fallback to card element
-                        try {
-                            paymentElement = elements.create('card', {
-                                style: {
-                                    base: {
-                                        fontSize: '16px',
-                                        color: '#424770',
-                                        '::placeholder': {
-                                            color: '#aab7c4',
-                                        },
-                                    },
-                                },
-                            });
-
-                            paymentElement.mount('#payment-element');
-                            usingCardElement = true;
-                            console.log('Card Element mounted as fallback');
-                        } catch (cardError) {
-                            console.error('Both Payment Element and Card Element failed:', cardError);
-                            document.getElementById("payment-errors").textContent = "Unable to load payment form. Please refresh the page.";
-                        }
+                        usingCardElement = true;
+                        console.log('Card Element mounted successfully with postal code disabled');
+                    } catch (cardError) {
+                        console.error('Card Element failed to mount:', cardError);
+                        document.getElementById("payment-errors").textContent = "Unable to load payment form. Please refresh the page.";
                     }
                 }
 
