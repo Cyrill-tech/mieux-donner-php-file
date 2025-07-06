@@ -857,6 +857,41 @@ function mieuxdonner_stripe_form($atts = []) {
             cursor: not-allowed;
             pointer-events: none;
         }
+        .payment-type-toggle {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        .payment-type-toggle label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            font-weight: normal;
+        }
+        .payment-methods {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+        .payment-method {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .payment-method:hover {
+            background: #f8f9fa;
+            border-color: #007cba;
+        }
+        .payment-method[style*="display: none"] {
+            display: none !important;
+        }
     </style>
 
     <div class="donation-form-container">
