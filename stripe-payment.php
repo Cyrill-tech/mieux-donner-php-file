@@ -819,6 +819,25 @@ function mieuxdonner_stripe_form($atts = []) {
             color: #333;
             margin-top: 10px;
         }
+        .loading-spinner {
+            display: none;
+            width: 20px;
+            height: 20px;
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid #007cba;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 8px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .btn-processing {
+            opacity: 0.7;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
     </style>
 
     <div class="donation-form-container">
@@ -1014,7 +1033,10 @@ function mieuxdonner_stripe_form($atts = []) {
                 </div>
                 <div class="form-navigation">
                     <button type="button" class="btn btn-secondary" onclick="prevStep()">Back</button>
-                    <button type="submit" class="btn btn-primary">Confirm</button>
+                    <button type="submit" class="btn btn-primary" id="confirm-btn">
+                        <span class="loading-spinner" id="loading-spinner"></span>
+                        <span id="confirm-text">Confirm</span>
+                    </button>
                 </div>
             </div>
         </form>
@@ -1392,6 +1414,26 @@ function mieuxdonner_stripe_form($atts = []) {
             document.getElementById('tip-percentage').value = tipPercentage;
         }
 
+        function showLoading() {
+            const confirmBtn = document.getElementById('confirm-btn');
+            const spinner = document.getElementById('loading-spinner');
+            const confirmText = document.getElementById('confirm-text');
+            
+            confirmBtn.classList.add('btn-processing');
+            spinner.style.display = 'inline-block';
+            confirmText.textContent = 'Processing...';
+        }
+
+        function hideLoading() {
+            const confirmBtn = document.getElementById('confirm-btn');
+            const spinner = document.getElementById('loading-spinner');
+            const confirmText = document.getElementById('confirm-text');
+            
+            confirmBtn.classList.remove('btn-processing');
+            spinner.style.display = 'none';
+            confirmText.textContent = 'Confirm';
+        }
+
         // Update tip amount when donation amount changes
         document.addEventListener('DOMContentLoaded', function() {
             // Add listener for amount changes
@@ -1492,6 +1534,9 @@ function mieuxdonner_stripe_form($atts = []) {
                 return;
             }
 
+            // Show loading state
+            showLoading();
+
             // Clear previous error messages
             document.getElementById("payment-errors").textContent = "";
             document.getElementById("payment-message").innerText = "";
@@ -1547,15 +1592,11 @@ function mieuxdonner_stripe_form($atts = []) {
                         });
 
                         if (error) {
+                            hideLoading();
                             document.getElementById("payment-errors").textContent = error.message;
                         } else {
-                            const successMessage = paymentType === 'monthly' ?
-                                "Monthly subscription set up successfully! Redirecting..." :
-                                "One-time donation successful! Redirecting...";
-                            document.getElementById("payment-message").innerText = successMessage;
-                            setTimeout(() => {
-                                window.location.href = "<?php echo esc_url(home_url('/merci')); ?>";
-                            }, 2000);
+                            // Success - redirect immediately without showing message
+                            window.location.href = "<?php echo esc_url(home_url('/merci')); ?>";
                         }
                     } else {
                         // Using Payment Element - use confirmPayment
@@ -1575,6 +1616,7 @@ function mieuxdonner_stripe_form($atts = []) {
                         });
 
                         if (error) {
+                            hideLoading();
                             if (error.type === 'card_error' || error.type === 'validation_error') {
                                 document.getElementById("payment-errors").textContent = error.message;
                             } else {
@@ -1586,6 +1628,7 @@ function mieuxdonner_stripe_form($atts = []) {
                 } else if (selectedPaymentMethod === 'apple_pay') {
                     // Handle Apple Pay according to Stripe documentation
                     if (!window.applePayAvailable) {
+                        hideLoading();
                         document.getElementById("payment-message").innerText = "Apple Pay is not available on this device.";
                         return;
                     }
@@ -1607,6 +1650,7 @@ function mieuxdonner_stripe_form($atts = []) {
                         const canMakePayment = await applePayRequest.canMakePayment();
                         
                         if (!canMakePayment) {
+                            hideLoading();
                             document.getElementById("payment-message").innerText = "Apple Pay is not available for this transaction.";
                             return;
                         }
@@ -1657,11 +1701,13 @@ function mieuxdonner_stripe_form($atts = []) {
                         await applePayRequest.show();
 
                     } catch (error) {
+                        hideLoading();
                         document.getElementById("payment-message").innerText = "Apple Pay failed: " + error.message;
                     }
                 } else if (selectedPaymentMethod === 'google_pay') {
                     // Handle Google Pay using Payment Request API
                     if (!window.googlePayAvailable) {
+                        hideLoading();
                         document.getElementById("payment-message").innerText = "Google Pay is not available on this device.";
                         return;
                     }
@@ -1684,6 +1730,7 @@ function mieuxdonner_stripe_form($atts = []) {
                         console.log('Google Pay canMakePayment result:', canMakePayment);
                         
                         if (!canMakePayment || !canMakePayment.googlePay) {
+                            hideLoading();
                             document.getElementById("payment-message").innerText = "Google Pay is not properly configured on this device. Please use Card payment instead.";
                             return;
                         }
@@ -1734,6 +1781,7 @@ function mieuxdonner_stripe_form($atts = []) {
                         await googlePayRequest.show();
 
                     } catch (error) {
+                        hideLoading();
                         document.getElementById("payment-message").innerText = "Google Pay failed: " + error.message;
                     }
                 } else {
@@ -1773,6 +1821,7 @@ function mieuxdonner_stripe_form($atts = []) {
                         const { error } = await stripe.confirmPayment(confirmParams);
 
                         if (error) {
+                            hideLoading();
                             if (error.type === 'card_error' || error.type === 'validation_error') {
                                 document.getElementById("payment-errors").textContent = error.message;
                             } else {
@@ -1780,10 +1829,12 @@ function mieuxdonner_stripe_form($atts = []) {
                             }
                         }
                     } else {
+                        hideLoading();
                         document.getElementById("payment-message").innerText = "Unable to process " + selectedPaymentMethod + " payment.";
                     }
                 }
             } catch (error) {
+                hideLoading();
                 document.getElementById("payment-message").innerText = "Network error. Please try again.";
                 console.error('Payment error:', error);
             }
