@@ -58,7 +58,7 @@ function mieuxdonner_process_payment() {
 
     // Validate and sanitize payment method
     $payment_method = isset($_POST['payment_method']) ? sanitize_text_field($_POST['payment_method']) : 'card';
-    if (!in_array($payment_method, ['card', 'paypal', 'google_pay', 'apple_pay', 'express_checkout'])) {
+    if (!in_array($payment_method, ['card', 'paypal', 'google_pay', 'apple_pay', 'express_checkout', 'twint'])) {
         $validation_errors[] = __('Invalid payment method selected', 'mieuxdonner-stripe');
     }
 
@@ -200,14 +200,29 @@ function mieuxdonner_process_payment() {
                 
                 if ($payment_method === 'paypal') {
                     $payment_method_types[] = 'paypal';
+                } elseif ($payment_method === 'twint') {
+                    // Twint requires CHF currency and specific amount limits
+                    if ($payment_type === 'monthly') {
+                        wp_send_json_error(['message' => 'Twint does not support recurring payments'], 400);
+                        exit;
+                    }
+                    // Twint max amount is 5,000 CHF (500,000 cents)
+                    if ($amount > 500000) {
+                        wp_send_json_error(['message' => 'Twint maximum amount is 5,000 CHF'], 400);
+                        exit;
+                    }
+                    $payment_method_types = ['twint'];
                 } elseif ($payment_method === 'apple_pay' || $payment_method === 'google_pay') {
                     // Apple Pay and Google Pay require card payment method type
                     $payment_method_types = ['card'];
                 }
 
+                // Set currency based on payment method
+                $currency = ($payment_method === 'twint') ? 'chf' : 'eur';
+                
                 $paymentIntent = \Stripe\PaymentIntent::create([
                     'amount' => $amount,
-                    'currency' => 'eur',
+                    'currency' => $currency,
                     'receipt_email' => $email,
                     'payment_method_types' => $payment_method_types,
                     'metadata' => [
@@ -384,7 +399,9 @@ function mieuxdonner_process_payment() {
 
     } catch (\Stripe\Exception\InvalidRequestException $e) {
         error_log('Stripe InvalidRequestException: ' . $e->getMessage());
-        wp_send_json_error(['message' => 'Invalid payment request'], 400);
+        error_log('Payment method: ' . ($payment_method ?? 'unknown'));
+        error_log('Payment method types: ' . json_encode($payment_method_types ?? []));
+        wp_send_json_error(['message' => 'Payment method not supported: ' . $e->getMessage()], 400);
     } catch (\Stripe\Exception\ApiErrorException $e) {
         error_log('Stripe API Error: ' . $e->getMessage());
         wp_send_json_error(['message' => 'Payment service temporarily unavailable'], 503);
@@ -450,6 +467,7 @@ function mieuxdonner_stripe_form($atts = []) {
             'paypal' => 'PayPal',
             'google_pay' => 'Google Pay',
             'apple_pay' => 'Apple Pay',
+            'twint' => 'Twint',
             'card_information' => 'Card information',
             'full_name' => 'Full name',
             'email' => 'Email',
@@ -491,6 +509,7 @@ function mieuxdonner_stripe_form($atts = []) {
             'paypal' => 'PayPal',
             'google_pay' => 'Google Pay',
             'apple_pay' => 'Apple Pay',
+            'twint' => 'Twint',
             'card_information' => 'Informations de carte',
             'full_name' => 'Nom complet',
             'email' => 'Email',
@@ -975,6 +994,10 @@ function mieuxdonner_stripe_form($atts = []) {
                         <input type="radio" name="payment_method" value="apple_pay">
                         <span>🍎 <?php echo esc_html($t['apple_pay']); ?></span>
                     </label>
+                    <label class="payment-method" id="twint-option" style="display: none;">
+                        <input type="radio" name="payment_method" value="twint">
+                        <span>🇨🇭 <?php echo esc_html($t['twint']); ?></span>
+                    </label>
                 </div>
                 
                 <div id="card-payment-section">
@@ -1219,6 +1242,8 @@ function mieuxdonner_stripe_form($atts = []) {
                     document.getElementById('apple-pay-button').addEventListener('click', function() {
                         console.log('Apple Pay button clicked - will be handled on form submission');
                     });
+                } else if (paymentMethod === 'twint') {
+                    expressContainer.innerHTML = '<div style="background: #0052cc; color: white; padding: 12px; border-radius: 4px; text-align: center;">🇨🇭 Twint</div>';
                 }
 
             } catch (error) {
@@ -1438,6 +1463,34 @@ function mieuxdonner_stripe_form($atts = []) {
         document.addEventListener('DOMContentLoaded', function() {
             // Add listener for amount changes
             document.getElementById('amount').addEventListener('input', updateTipAmount);
+            
+            // Add listeners for payment type changes to handle Twint visibility
+            const paymentTypeRadios = document.querySelectorAll('input[name="payment_type"]');
+            paymentTypeRadios.forEach(radio => {
+                radio.addEventListener('change', function() {
+                    const twintOption = document.getElementById('twint-option');
+                    if (this.value === 'monthly') {
+                        // Hide Twint for monthly payments (not supported)
+                        twintOption.style.display = 'none';
+                        // If Twint was selected, switch to card
+                        const twintRadio = document.querySelector('input[value="twint"]');
+                        if (twintRadio && twintRadio.checked) {
+                            document.querySelector('input[value="card"]').checked = true;
+                        }
+                    } else {
+                        // Show Twint for one-time payments
+                        twintOption.style.display = 'block';
+                    }
+                });
+            });
+            
+            // Initial check for payment type
+            const monthlyRadio = document.querySelector('input[name="payment_type"][value="monthly"]');
+            if (monthlyRadio && monthlyRadio.checked) {
+                document.getElementById('twint-option').style.display = 'none';
+            } else {
+                document.getElementById('twint-option').style.display = 'block';
+            }
         });
 
         function updateSummary() {
