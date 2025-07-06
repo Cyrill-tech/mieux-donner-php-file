@@ -1102,7 +1102,7 @@ function mieuxdonner_stripe_form($atts = []) {
                         <input type="radio" name="payment_method" value="apple_pay">
                         <span>🍎 <?php echo esc_html($t['apple_pay']); ?></span>
                     </label>
-                    <label class="payment-method" id="twint-option" style="display: none;">
+                    <label class="payment-method" id="twint-option">
                         <input type="radio" name="payment_method" value="twint">
                         <span>🇨🇭 <?php echo esc_html($t['twint']); ?></span>
                     </label>
