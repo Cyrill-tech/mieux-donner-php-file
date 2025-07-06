@@ -908,7 +908,7 @@ function mieuxdonner_stripe_form($atts = []) {
                             <span class="tip-title">Support our work</span>
                             <span class="tip-info" title="We estimate that the average dollar spent on operations generates $6 for highly effective charities.">ℹ️</span>
                         </div>
-                        <p class="tip-description">We estimate that the average dollar spent on operations generates $6 for highly effective charities. <a href="#" class="learn-more">Learn more</a></p>
+                        <p class="tip-description">We estimate that the average dollar spent on operations generates $6 for highly effective charities.</p>
                         
                         <div class="tip-slider-container">
                             <div class="tip-labels">
@@ -922,14 +922,6 @@ function mieuxdonner_stripe_form($atts = []) {
                                 <input type="range" id="tip-slider" min="0" max="20" step="5" value="10" onchange="updateTipAmount()">
                                 <div class="tip-track"></div>
                             </div>
-                            <div class="tip-options">
-                                <button type="button" class="tip-btn" data-tip="0" onclick="setTip(0)">0%</button>
-                                <button type="button" class="tip-btn" data-tip="5" onclick="setTip(5)">5%</button>
-                                <button type="button" class="tip-btn active" data-tip="10" onclick="setTip(10)">10%</button>
-                                <button type="button" class="tip-btn" data-tip="15" onclick="setTip(15)">15%</button>
-                                <button type="button" class="tip-btn" data-tip="20" onclick="setTip(20)">20%</button>
-                            </div>
-                            <button type="button" class="skip-tip-btn" onclick="setTip(0)">Skip</button>
                         </div>
                         
                         <div class="tip-amount-display">
@@ -1387,14 +1379,6 @@ function mieuxdonner_stripe_form($atts = []) {
             // Update hidden input
             document.getElementById('tip-percentage').value = percentage;
             
-            // Update active button
-            document.querySelectorAll('.tip-btn').forEach(btn => {
-                btn.classList.remove('active');
-                if (parseInt(btn.dataset.tip) === percentage) {
-                    btn.classList.add('active');
-                }
-            });
-            
             // Update tip amount display
             updateTipAmount();
         }
@@ -1406,14 +1390,6 @@ function mieuxdonner_stripe_form($atts = []) {
             
             document.getElementById('tip-amount').textContent = tipAmount;
             document.getElementById('tip-percentage').value = tipPercentage;
-            
-            // Update active button to match slider
-            document.querySelectorAll('.tip-btn').forEach(btn => {
-                btn.classList.remove('active');
-                if (parseInt(btn.dataset.tip) === tipPercentage) {
-                    btn.classList.add('active');
-                }
-            });
         }
 
         // Update tip amount when donation amount changes
