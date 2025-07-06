@@ -830,11 +830,11 @@ function mieuxdonner_stripe_form($atts = []) {
             </div>
             <div class="progress-step" data-step="3">
                 <div class="step-circle">3</div>
-                <div class="step-label"><?php echo esc_html($t['personal_details']); ?></div>
+                <div class="step-label"><?php echo esc_html($t['payment_details']); ?></div>
             </div>
             <div class="progress-step" data-step="4">
                 <div class="step-circle">4</div>
-                <div class="step-label"><?php echo esc_html($t['payment_details']); ?></div>
+                <div class="step-label"><?php echo esc_html($t['personal_details']); ?></div>
             </div>
             <div class="progress-step" data-step="5">
                 <div class="step-circle">5</div>
@@ -941,29 +941,8 @@ function mieuxdonner_stripe_form($atts = []) {
                 </div>
             </div>
 
-            <!-- Step 3: Personal Details -->
+            <!-- Step 3: Payment Details -->
             <div class="form-step" data-step="3">
-                <h3><?php echo esc_html($t['personal_details']); ?></h3>
-                <div class="form-group">
-                    <label for="full_name"><?php echo esc_html($t['full_name']); ?></label>
-                    <input type="text" id="full_name" name="name" required minlength="2" maxlength="100">
-                </div>
-                <div class="form-group">
-                    <label for="email"><?php echo esc_html($t['email']); ?></label>
-                    <input type="email" id="email" name="email" required maxlength="254">
-                </div>
-                <div class="form-group">
-                    <label for="address"><?php echo esc_html($t['address']); ?></label>
-                    <input type="text" id="address" name="address" maxlength="255">
-                </div>
-                <div class="form-navigation">
-                    <button type="button" class="btn btn-secondary" onclick="prevStep()"><?php echo esc_html($t['back']); ?></button>
-                    <button type="button" class="btn btn-primary" onclick="nextStep()"><?php echo esc_html($t['next']); ?></button>
-                </div>
-            </div>
-
-            <!-- Step 4: Payment Details -->
-            <div class="form-step" data-step="4">
                 <h3><?php echo esc_html($t['payment_details']); ?></h3>
                 <div class="payment-methods">
                     <label class="payment-method">
@@ -1001,6 +980,27 @@ function mieuxdonner_stripe_form($atts = []) {
                     <div id="express-payment-errors" role="alert"></div>
                 </div>
                 
+                <div class="form-navigation">
+                    <button type="button" class="btn btn-secondary" onclick="prevStep()"><?php echo esc_html($t['back']); ?></button>
+                    <button type="button" class="btn btn-primary" onclick="nextStep()"><?php echo esc_html($t['next']); ?></button>
+                </div>
+            </div>
+
+            <!-- Step 4: Personal Details -->
+            <div class="form-step" data-step="4">
+                <h3><?php echo esc_html($t['personal_details']); ?></h3>
+                <div class="form-group">
+                    <label for="full_name"><?php echo esc_html($t['full_name']); ?></label>
+                    <input type="text" id="full_name" name="name" required minlength="2" maxlength="100">
+                </div>
+                <div class="form-group">
+                    <label for="email"><?php echo esc_html($t['email']); ?></label>
+                    <input type="email" id="email" name="email" required maxlength="254">
+                </div>
+                <div class="form-group">
+                    <label for="address"><?php echo esc_html($t['address']); ?></label>
+                    <input type="text" id="address" name="address" maxlength="255">
+                </div>
                 <div class="form-navigation">
                     <button type="button" class="btn btn-secondary" onclick="prevStep()"><?php echo esc_html($t['back']); ?></button>
                     <button type="button" class="btn btn-primary" onclick="nextStep()"><?php echo esc_html($t['next']); ?></button>
@@ -1209,7 +1209,7 @@ function mieuxdonner_stripe_form($atts = []) {
                     showStep(currentStep);
                     updateProgress();
 
-                    if (currentStep === 4) {
+                    if (currentStep === 3) {
                         await initializePaymentElements();
                     }
                     if (currentStep === 5) {
@@ -1289,6 +1289,14 @@ function mieuxdonner_stripe_form($atts = []) {
                     }
                     return true;
                 case 3:
+                    // For step 3, just ensure payment elements are initialized
+                    // Actual validation happens during payment confirmation
+                    if (!paymentElement) {
+                        showValidationError('Payment form not ready. Please wait a moment and try again.');
+                        return false;
+                    }
+                    return true;
+                case 4:
                     const name = document.getElementById('full_name').value.trim();
                     const email = document.getElementById('email').value.trim();
                     if (!name || name.length < 2) {
@@ -1297,14 +1305,6 @@ function mieuxdonner_stripe_form($atts = []) {
                     }
                     if (!email || !/^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(email)) {
                         showValidationError('Please enter a valid email address');
-                        return false;
-                    }
-                    return true;
-                case 4:
-                    // For step 4, just ensure payment elements are initialized
-                    // Actual validation happens during payment confirmation
-                    if (!paymentElement) {
-                        showValidationError('Payment form not ready. Please wait a moment and try again.');
                         return false;
                     }
                     return true;
