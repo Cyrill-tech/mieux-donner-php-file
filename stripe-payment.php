@@ -200,8 +200,8 @@ function mieuxdonner_process_payment() {
                 
                 if ($payment_method === 'paypal') {
                     $payment_method_types[] = 'paypal';
-                } elseif ($payment_method === 'apple_pay') {
-                    // Apple Pay requires card payment method type
+                } elseif ($payment_method === 'apple_pay' || $payment_method === 'google_pay') {
+                    // Apple Pay and Google Pay require card payment method type
                     $payment_method_types = ['card'];
                 }
 
@@ -956,7 +956,7 @@ function mieuxdonner_stripe_form($atts = []) {
                         <input type="radio" name="payment_method" value="paypal">
                         <span>💙 <?php echo esc_html($t['paypal']); ?></span>
                     </label>
-                    <label class="payment-method">
+                    <label class="payment-method" id="google-pay-option" style="display: none;">
                         <input type="radio" name="payment_method" value="google_pay">
                         <span>🟡 <?php echo esc_html($t['google_pay']); ?></span>
                     </label>
@@ -1085,6 +1085,37 @@ function mieuxdonner_stripe_form($atts = []) {
                         console.log('Apple Pay not available on this device');
                     }
                 });
+            }
+
+            // Check for Google Pay support (more restrictive for better reliability)
+            if (stripe) {
+                // Check if we're on Android or have proper Google Pay setup
+                const isAndroid = /Android/i.test(navigator.userAgent);
+                const isChrome = /Chrome/i.test(navigator.userAgent) && !/Edge/i.test(navigator.userAgent);
+                
+                if (isAndroid && isChrome) {
+                    const testGooglePayRequest = stripe.paymentRequest({
+                        country: 'FR',
+                        currency: 'eur',
+                        total: {
+                            label: 'Test',
+                            amount: 100,
+                        },
+                    });
+
+                    testGooglePayRequest.canMakePayment().then(function(result) {
+                        console.log('Google Pay detection result:', result);
+                        if (result && result.googlePay) {
+                            document.getElementById('google-pay-option').style.display = 'block';
+                            console.log('Google Pay is available');
+                            window.googlePayAvailable = true;
+                        } else {
+                            console.log('Google Pay not available on this device');
+                        }
+                    });
+                } else {
+                    console.log('Google Pay disabled - requires Android Chrome for reliable operation');
+                }
             }
 
             document.getElementById("stripe-donation-form").addEventListener("submit", handleFormSubmit);
@@ -1651,6 +1682,83 @@ function mieuxdonner_stripe_form($atts = []) {
 
                     } catch (error) {
                         document.getElementById("payment-message").innerText = "Apple Pay failed: " + error.message;
+                    }
+                } else if (selectedPaymentMethod === 'google_pay') {
+                    // Handle Google Pay using Payment Request API
+                    if (!window.googlePayAvailable) {
+                        document.getElementById("payment-message").innerText = "Google Pay is not available on this device.";
+                        return;
+                    }
+
+                    try {
+                        // Create payment request with current amount
+                        const googlePayRequest = stripe.paymentRequest({
+                            country: 'FR',
+                            currency: 'eur',
+                            total: {
+                                label: 'Donation',
+                                amount: Math.round(totalAmount * 100),
+                            },
+                            requestPayerName: false,
+                            requestPayerEmail: false,
+                        });
+
+                        // Check if this specific request can make payment
+                        const canMakePayment = await googlePayRequest.canMakePayment();
+                        console.log('Google Pay canMakePayment result:', canMakePayment);
+                        
+                        if (!canMakePayment || !canMakePayment.googlePay) {
+                            document.getElementById("payment-message").innerText = "Google Pay is not properly configured on this device. Please use Card payment instead.";
+                            return;
+                        }
+
+                        // Handle the payment method event
+                        googlePayRequest.on('paymentmethod', async (ev) => {
+                            try {
+                                // Create PaymentIntent with the form data
+                                const response = await createPaymentIntent({
+                                    amount: Math.round(totalAmount * 100),
+                                    charity,
+                                    paymentType,
+                                    paymentMethod: 'google_pay',
+                                    name: name,
+                                    email: email,
+                                    address: address,
+                                    tipPercentage: tipPercentage
+                                });
+
+                                if (response.clientSecret) {
+                                    // Confirm payment with the Google Pay payment method
+                                    const { error: confirmError } = await stripe.confirmCardPayment(
+                                        response.clientSecret,
+                                        { payment_method: ev.paymentMethod.id },
+                                        { handleActions: false }
+                                    );
+
+                                    if (confirmError) {
+                                        ev.complete('fail');
+                                        document.getElementById("payment-message").innerText = "Payment failed: " + confirmError.message;
+                                    } else {
+                                        ev.complete('success');
+                                        // Redirect to success page
+                                        window.location.href = "<?php echo esc_url(home_url('/merci')); ?>";
+                                    }
+                                } else {
+                                    ev.complete('fail');
+                                    document.getElementById("payment-message").innerText = "Unable to process payment.";
+                                }
+                            } catch (error) {
+                                ev.complete('fail');
+                                console.error('Google Pay error:', error);
+                                document.getElementById("payment-message").innerText = "Payment failed: " + error.message;
+                            }
+                        });
+
+                        // Show the Google Pay payment sheet
+                        await googlePayRequest.show();
+
+                    } catch (error) {
+                        document.getElementById("payment-message").innerText = "Google Pay failed: " + error.message;
                     }
                 } else {
                     // Handle PayPal and other express payments using PaymentIntent
