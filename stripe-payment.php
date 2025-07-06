@@ -1584,9 +1584,6 @@ function mieuxdonner_stripe_form($atts = []) {
                     }
 
                     try {
-                        // Add visible debugging
-                        document.getElementById("payment-message").innerText = "Step 1: Creating Apple Pay request for €" + totalAmount.toFixed(2) + "...";
-                        
                         // Create payment request with current amount
                         const applePayRequest = stripe.paymentRequest({
                             country: 'FR',
@@ -1599,17 +1596,13 @@ function mieuxdonner_stripe_form($atts = []) {
                             requestPayerEmail: false,
                         });
 
-                        document.getElementById("payment-message").innerText = "Step 2: Apple Pay request created, checking availability...";
-
                         // Check if this specific request can make payment
                         const canMakePayment = await applePayRequest.canMakePayment();
                         
                         if (!canMakePayment) {
-                            document.getElementById("payment-message").innerText = "Apple Pay is not available for this transaction amount or configuration.";
+                            document.getElementById("payment-message").innerText = "Apple Pay is not available for this transaction.";
                             return;
                         }
-
-                        document.getElementById("payment-message").innerText = "Step 3: Apple Pay available, setting up payment handler...";
 
                         // Handle the payment method event
                         applePayRequest.on('paymentmethod', async (ev) => {
@@ -1654,15 +1647,10 @@ function mieuxdonner_stripe_form($atts = []) {
                         });
 
                         // Show the Apple Pay payment sheet
-                        document.getElementById("payment-message").innerText = "Step 4: Showing Apple Pay payment sheet...";
                         await applePayRequest.show();
 
                     } catch (error) {
-                        document.getElementById("payment-message").innerHTML = 
-                            "<strong>Apple Pay Error:</strong><br>" + 
-                            "Error: " + error.message + "<br>" + 
-                            "Type: " + error.type + "<br>" +
-                            "Please try using Card payment instead.";
+                        document.getElementById("payment-message").innerText = "Apple Pay failed: " + error.message;
                     }
                 } else {
                     // Handle PayPal and other express payments using PaymentIntent
