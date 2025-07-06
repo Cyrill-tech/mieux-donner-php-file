@@ -79,7 +79,7 @@ function mieuxdonner_process_payment() {
 
     // Validate and sanitize charity (single selection)
     $charity = isset($_POST['charity']) ? sanitize_text_field($_POST['charity']) : '';
-    $valid_charities = ['all_charities', 'clean_water', 'education_fund', 'medical_aid', 'hunger_relief', 'environmental', 'refugee_support', 'childrens_rights'];
+    $valid_charities = ['all_charities', 'against_malaria', 'ai_safety_center', 'good_food_institute', 'helen_keller', 'new_incentives', 'preserving_future', 'humane_league'];
 
     if (empty($charity)) {
         $validation_errors[] = __('Please select a charity to support', 'mieuxdonner-stripe');
@@ -118,13 +118,13 @@ function mieuxdonner_process_payment() {
         // Create charity metadata
         $charity_names = [
             'all_charities' => 'All charities fund',
-            'clean_water' => 'Clean Water Initiative',
-            'education_fund' => 'Global Education Fund',
-            'medical_aid' => 'Emergency Medical Aid',
-            'hunger_relief' => 'Hunger Relief Network',
-            'environmental' => 'Environmental Protection Alliance',
-            'refugee_support' => 'Refugee Support Foundation',
-            'childrens_rights' => 'Children\'s Rights Advocacy'
+            'against_malaria' => 'Against Malaria Foundation',
+            'ai_safety_center' => 'Centre pour la Sécurité de l\'IA',
+            'good_food_institute' => 'Good Food Institute',
+            'helen_keller' => 'Helen Keller International',
+            'new_incentives' => 'New Incentives',
+            'preserving_future' => 'Preserving the future fund',
+            'humane_league' => 'The Humane League'
         ];
 
         $selected_charity_name = $charity_names[$charity] ?? $charity;
@@ -445,13 +445,16 @@ function mieuxdonner_stripe_form($atts = []) {
             'confirm_donation' => 'Confirm donation',
             'select_charity' => 'Select charity to donate',
             'all_charities_fund' => 'All charities fund',
-            'clean_water_initiative' => 'Clean Water Initiative',
-            'global_education_fund' => 'Global Education Fund',
-            'emergency_medical_aid' => 'Emergency Medical Aid',
-            'hunger_relief_network' => 'Hunger Relief Network',
-            'environmental_protection' => 'Environmental Protection Alliance',
-            'refugee_support' => 'Refugee Support Foundation',
-            'childrens_rights' => 'Children\'s Rights Advocacy',
+            'against_malaria' => 'Against Malaria Foundation',
+            'ai_safety_center' => 'Centre pour la Sécurité de l\'IA',
+            'good_food_institute' => 'Good Food Institute',
+            'helen_keller' => 'Helen Keller International',
+            'new_incentives' => 'New Incentives',
+            'preserving_future' => 'Preserving the future fund',
+            'humane_league' => 'The Humane League',
+            'tax_reduction' => 'Tax reduction',
+            'tax_reduction_yes' => 'I want to benefit from the tax reduction and share my information with the charity',
+            'tax_reduction_no' => 'I don\'t need tax reduction',
             'next' => 'Next',
             'back' => 'Back',
             'donate_to' => 'Donate to All charities fund',
@@ -487,13 +490,16 @@ function mieuxdonner_stripe_form($atts = []) {
             'confirm_donation' => 'Confirmer le don',
             'select_charity' => 'Sélectionner une association à soutenir',
             'all_charities_fund' => 'Fonds toutes associations',
-            'clean_water_initiative' => 'Initiative Eau Propre',
-            'global_education_fund' => 'Fonds Éducation Mondiale',
-            'emergency_medical_aid' => 'Aide Médicale d\'Urgence',
-            'hunger_relief_network' => 'Réseau Aide Alimentaire',
-            'environmental_protection' => 'Alliance Protection Environnementale',
-            'refugee_support' => 'Fondation Soutien Réfugiés',
-            'childrens_rights' => 'Défense des Droits de l\'Enfant',
+            'against_malaria' => 'Against Malaria Foundation',
+            'ai_safety_center' => 'Centre pour la Sécurité de l\'IA',
+            'good_food_institute' => 'Good Food Institute',
+            'helen_keller' => 'Helen Keller International',
+            'new_incentives' => 'New Incentives',
+            'preserving_future' => 'Preserving the future fund',
+            'humane_league' => 'The Humane League',
+            'tax_reduction' => 'Réduction fiscale',
+            'tax_reduction_yes' => 'Je souhaite bénéficier de la réduction fiscale et partager mes informations avec l\'association',
+            'tax_reduction_no' => 'Je n\'ai pas besoin de réduction fiscale',
             'next' => 'Suivant',
             'back' => 'Retour',
             'donate_to' => 'Faire un don au fonds toutes associations',
@@ -892,6 +898,60 @@ function mieuxdonner_stripe_form($atts = []) {
         .payment-method[style*="display: none"] {
             display: none !important;
         }
+        .tax-reduction-section {
+            margin-bottom: 30px;
+            padding: 20px;
+            background: white;
+            border-radius: 8px;
+            border: 1px solid #e0e0e0;
+        }
+        .tax-reduction-section h4 {
+            margin: 0 0 15px 0;
+            font-size: 16px;
+            color: #333;
+        }
+        .tax-toggle {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        .toggle-label {
+            position: relative;
+            width: 36px;
+            height: 20px;
+            background: #ddd;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        .toggle-slider {
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 16px;
+            height: 16px;
+            background: white;
+            border-radius: 50%;
+            transition: transform 0.3s;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+        }
+        #tax-reduction-toggle {
+            display: none;
+        }
+        #tax-reduction-toggle:checked + .toggle-label {
+            background: #007cba;
+        }
+        #tax-reduction-toggle:checked + .toggle-label .toggle-slider {
+            transform: translateX(12px);
+        }
+        .toggle-text {
+            font-size: 14px;
+            color: #666;
+            line-height: 1.4;
+        }
+        .charity-option.hidden {
+            display: none;
+        }
     </style>
 
     <div class="donation-form-container">
@@ -922,38 +982,51 @@ function mieuxdonner_stripe_form($atts = []) {
             <!-- Step 1: Charity Selection -->
             <div class="form-step active" data-step="1">
                 <h3><?php echo esc_html($t['select_charity']); ?></h3>
-                <div class="charity-options">
-                    <label class="charity-option">
+                
+                <!-- Tax Reduction Toggle -->
+                <div class="tax-reduction-section">
+                    <h4><?php echo esc_html($t['tax_reduction']); ?></h4>
+                    <div class="tax-toggle">
+                        <input type="checkbox" id="tax-reduction-toggle" name="tax_reduction" checked>
+                        <label for="tax-reduction-toggle" class="toggle-label">
+                            <div class="toggle-slider"></div>
+                        </label>
+                        <span class="toggle-text" id="toggle-text"><?php echo esc_html($t['tax_reduction_yes']); ?></span>
+                    </div>
+                </div>
+
+                <div class="charity-options" id="charity-options">
+                    <label class="charity-option" data-tax-eligible="true">
                         <input type="radio" name="charity" value="all_charities" required>
                         <span><?php echo esc_html($t['all_charities_fund']); ?></span>
                     </label>
-                    <label class="charity-option">
-                        <input type="radio" name="charity" value="clean_water" required>
-                        <span><?php echo esc_html($t['clean_water_initiative']); ?></span>
+                    <label class="charity-option" data-tax-eligible="true">
+                        <input type="radio" name="charity" value="against_malaria" required>
+                        <span><?php echo esc_html($t['against_malaria']); ?></span>
                     </label>
-                    <label class="charity-option">
-                        <input type="radio" name="charity" value="education_fund" required>
-                        <span><?php echo esc_html($t['global_education_fund']); ?></span>
+                    <label class="charity-option" data-tax-eligible="true">
+                        <input type="radio" name="charity" value="ai_safety_center" required>
+                        <span><?php echo esc_html($t['ai_safety_center']); ?></span>
                     </label>
-                    <label class="charity-option">
-                        <input type="radio" name="charity" value="medical_aid" required>
-                        <span><?php echo esc_html($t['emergency_medical_aid']); ?></span>
+                    <label class="charity-option" data-tax-eligible="true">
+                        <input type="radio" name="charity" value="good_food_institute" required>
+                        <span><?php echo esc_html($t['good_food_institute']); ?></span>
                     </label>
-                    <label class="charity-option">
-                        <input type="radio" name="charity" value="hunger_relief" required>
-                        <span><?php echo esc_html($t['hunger_relief_network']); ?></span>
+                    <label class="charity-option" data-tax-eligible="true">
+                        <input type="radio" name="charity" value="helen_keller" required>
+                        <span><?php echo esc_html($t['helen_keller']); ?></span>
                     </label>
-                    <label class="charity-option">
-                        <input type="radio" name="charity" value="environmental" required>
-                        <span><?php echo esc_html($t['environmental_protection']); ?></span>
+                    <label class="charity-option" data-tax-eligible="false">
+                        <input type="radio" name="charity" value="new_incentives" required>
+                        <span><?php echo esc_html($t['new_incentives']); ?></span>
                     </label>
-                    <label class="charity-option">
-                        <input type="radio" name="charity" value="refugee_support" required>
-                        <span><?php echo esc_html($t['refugee_support']); ?></span>
+                    <label class="charity-option" data-tax-eligible="false">
+                        <input type="radio" name="charity" value="preserving_future" required>
+                        <span><?php echo esc_html($t['preserving_future']); ?></span>
                     </label>
-                    <label class="charity-option">
-                        <input type="radio" name="charity" value="childrens_rights" required>
-                        <span><?php echo esc_html($t['childrens_rights']); ?></span>
+                    <label class="charity-option" data-tax-eligible="false">
+                        <input type="radio" name="charity" value="humane_league" required>
+                        <span><?php echo esc_html($t['humane_league']); ?></span>
                     </label>
                 </div>
                 <div class="form-navigation">
@@ -1519,7 +1592,48 @@ function mieuxdonner_stripe_form($atts = []) {
             } else {
                 document.getElementById('twint-option').style.display = 'block';
             }
+
+            // Add tax reduction toggle listener
+            const taxToggle = document.getElementById('tax-reduction-toggle');
+            const toggleText = document.getElementById('toggle-text');
+            
+            if (taxToggle && toggleText) {
+                taxToggle.addEventListener('change', function() {
+                    const wantsTaxReduction = this.checked;
+                    
+                    // Update toggle text
+                    if (wantsTaxReduction) {
+                        toggleText.textContent = translations.tax_reduction_yes;
+                    } else {
+                        toggleText.textContent = translations.tax_reduction_no;
+                    }
+                    
+                    // Filter charities based on tax reduction choice
+                    filterCharitiesByTaxEligibility(wantsTaxReduction);
+                });
+                
+                // Initial filter
+                filterCharitiesByTaxEligibility(true);
+            }
         });
+
+        function filterCharitiesByTaxEligibility(wantsTaxReduction) {
+            const charityOptions = document.querySelectorAll('.charity-option');
+            
+            charityOptions.forEach(option => {
+                const isTaxEligible = option.getAttribute('data-tax-eligible') === 'true';
+                const radio = option.querySelector('input[type="radio"]');
+                
+                if (wantsTaxReduction && !isTaxEligible) {
+                    // Hide non-tax-eligible charities when tax reduction is wanted
+                    option.classList.add('hidden');
+                    radio.checked = false; // Uncheck if it was selected
+                } else if (!wantsTaxReduction || isTaxEligible) {
+                    // Show all charities when no tax reduction wanted, or tax-eligible charities when tax reduction wanted
+                    option.classList.remove('hidden');
+                }
+            });
+        }
 
         function updateSummary() {
             const charity = document.querySelector('input[name="charity"]:checked');
