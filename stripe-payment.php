@@ -1062,27 +1062,27 @@ function mieuxdonner_stripe_form($atts = []) {
                 }
             });
 
-            // Check for Apple Pay support and create payment request
-            if (window.ApplePaySession && ApplePaySession.canMakePayments()) {
-                // Create Apple Pay payment request once
-                applePayRequest = stripe.paymentRequest({
+            // Check for Apple Pay support using Stripe's recommended approach
+            if (stripe && window.ApplePaySession && ApplePaySession.canMakePayments()) {
+                // Create a minimal payment request to check Apple Pay availability
+                const testPaymentRequest = stripe.paymentRequest({
                     country: 'FR',
                     currency: 'eur',
                     total: {
-                        label: 'Donation',
-                        amount: 10000 // Will be updated dynamically
+                        label: 'Test',
+                        amount: 100,
                     },
-                    requestPayerName: true,
-                    requestPayerEmail: true,
                 });
 
-                // Check if this payment request can be used
-                applePayRequest.canMakePayment().then(function(result) {
-                    if (result) {
+                testPaymentRequest.canMakePayment().then(function(result) {
+                    if (result && result.applePay) {
                         document.getElementById('apple-pay-option').style.display = 'block';
-                        console.log('Apple Pay is available and configured');
+                        console.log('Apple Pay is available');
+                        
+                        // Store the payment request for later use
+                        window.applePayAvailable = true;
                     } else {
-                        console.log('Apple Pay not available');
+                        console.log('Apple Pay not available on this device');
                     }
                 });
             }
@@ -1577,66 +1577,92 @@ function mieuxdonner_stripe_form($atts = []) {
                         // Note: For Payment Element, successful payments redirect automatically
                     }
                 } else if (selectedPaymentMethod === 'apple_pay') {
-                    // Handle Apple Pay using pre-created payment request
-                    try {
-                        if (!applePayRequest) {
-                            document.getElementById("payment-message").innerText = "Apple Pay is not available.";
-                            return;
-                        }
+                    // Handle Apple Pay according to Stripe documentation
+                    if (!window.applePayAvailable) {
+                        document.getElementById("payment-message").innerText = "Apple Pay is not available on this device.";
+                        return;
+                    }
 
-                        // Update the payment request with current amount
-                        applePayRequest.update({
+                    try {
+                        // Add visible debugging
+                        document.getElementById("payment-message").innerText = "Step 1: Creating Apple Pay request for €" + totalAmount.toFixed(2) + "...";
+                        
+                        // Create payment request with current amount
+                        const applePayRequest = stripe.paymentRequest({
+                            country: 'FR',
+                            currency: 'eur',
                             total: {
                                 label: 'Donation',
-                                amount: Math.round(totalAmount * 100)
-                            }
+                                amount: Math.round(totalAmount * 100),
+                            },
+                            requestPayerName: false,
+                            requestPayerEmail: false,
                         });
 
-                        // Show Apple Pay payment sheet
-                        const { paymentMethod, error: paymentError } = await applePayRequest.show();
+                        document.getElementById("payment-message").innerText = "Step 2: Apple Pay request created, checking availability...";
+
+                        // Check if this specific request can make payment
+                        const canMakePayment = await applePayRequest.canMakePayment();
                         
-                        if (paymentError) {
-                            console.error('Apple Pay show error:', paymentError);
-                            document.getElementById("payment-message").innerText = "Apple Pay failed: " + paymentError.message;
+                        if (!canMakePayment) {
+                            document.getElementById("payment-message").innerText = "Apple Pay is not available for this transaction amount or configuration.";
                             return;
                         }
 
-                        // Create PaymentIntent with the payment method
-                        const response = await createPaymentIntent({
-                            amount: Math.round(totalAmount * 100),
-                            charity,
-                            paymentType,
-                            paymentMethod: 'apple_pay',
-                            name: paymentMethod.billing_details?.name || name,
-                            email: paymentMethod.billing_details?.email || email,
-                            address: paymentMethod.billing_details?.address?.line1 || address,
-                            tipPercentage: tipPercentage
+                        document.getElementById("payment-message").innerText = "Step 3: Apple Pay available, setting up payment handler...";
+
+                        // Handle the payment method event
+                        applePayRequest.on('paymentmethod', async (ev) => {
+                            try {
+                                // Create PaymentIntent server-side as recommended
+                                const response = await createPaymentIntent({
+                                    amount: Math.round(totalAmount * 100),
+                                    charity,
+                                    paymentType,
+                                    paymentMethod: 'apple_pay',
+                                    name: name,
+                                    email: email,
+                                    address: address,
+                                    tipPercentage: tipPercentage
+                                });
+
+                                if (response.clientSecret) {
+                                    // Confirm the payment on the client
+                                    const { error } = await stripe.confirmCardPayment(
+                                        response.clientSecret,
+                                        { payment_method: ev.paymentMethod.id },
+                                        { handleActions: false }
+                                    );
+
+                                    if (error) {
+                                        ev.complete('fail');
+                                        document.getElementById("payment-message").innerText = "Payment failed: " + error.message;
+                                    } else {
+                                        ev.complete('success');
+                                        // Redirect to success page
+                                        window.location.href = "<?php echo esc_url(home_url('/merci')); ?>";
+                                    }
+                                } else {
+                                    ev.complete('fail');
+                                    document.getElementById("payment-message").innerText = "Unable to process payment.";
+                                }
+                            } catch (error) {
+                                ev.complete('fail');
+                                console.error('Apple Pay error:', error);
+                                document.getElementById("payment-message").innerText = "Payment failed: " + error.message;
+                            }
                         });
 
-                        if (response.usePaymentIntent && response.clientSecret) {
-                            // Confirm payment with the Apple Pay payment method
-                            const { error: confirmError } = await stripe.confirmCardPayment(
-                                response.clientSecret,
-                                { payment_method: paymentMethod.id }
-                            );
+                        // Show the Apple Pay payment sheet
+                        document.getElementById("payment-message").innerText = "Step 4: Showing Apple Pay payment sheet...";
+                        await applePayRequest.show();
 
-                            if (confirmError) {
-                                console.error('Apple Pay confirm error:', confirmError);
-                                document.getElementById("payment-message").innerText = "Payment failed: " + confirmError.message;
-                            } else {
-                                // Success
-                                document.getElementById("payment-message").innerText = "Payment successful! Redirecting...";
-                                setTimeout(() => {
-                                    window.location.href = "<?php echo esc_url(home_url('/merci')); ?>";
-                                }, 1000);
-                            }
-                        } else {
-                            document.getElementById("payment-message").innerText = "Unable to create payment.";
-                        }
-                        
                     } catch (error) {
-                        console.error('Apple Pay error:', error);
-                        document.getElementById("payment-message").innerText = "Apple Pay failed: " + error.message;
+                        document.getElementById("payment-message").innerHTML = 
+                            "<strong>Apple Pay Error:</strong><br>" + 
+                            "Error: " + error.message + "<br>" + 
+                            "Type: " + error.type + "<br>" +
+                            "Please try using Card payment instead.";
                     }
                 } else {
                     // Handle PayPal and other express payments using PaymentIntent
